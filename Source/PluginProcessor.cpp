@@ -32,15 +32,15 @@ juce::AudioProcessorValueTreeState::ParameterLayout TempoReverbProcessor::create
 
     StringArray types, notes, slopes { "OFF", "6", "12", "24" };
     for (int i = 0; i < bh::NumTypes; ++i) types.add (bh::kTypeNames[i]);
-    for (int i = 0; i < 9; ++i) notes.add (bh::kNoteNames[i]);
+    for (int i = 0; i < bh::kNumPre; ++i) notes.add (bh::kPreNames[i]);
     StringArray tnotes;
-    for (int i = 0; i < bh::kNumTimeNotes; ++i) tnotes.add (bh::kTimeNames[i]);
+    for (int i = 0; i < bh::kNumTime; ++i) tnotes.add (bh::kTimeNames[i]);
 
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "type", 1 }, "Reverb Type", types, 0));
     B ("sync", "Tempo Sync", true);
     F ("bpm", "Manual Tempo", NRange (40.f, 240.f, 1.f), 120.f, fmtBpm);
-    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "preNote", 1 }, "Pre-Delay Note", notes, 2));
-    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "timeNote", 1 }, "Reverb Time Note", tnotes, 8));
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "preNote", 1 }, "Pre-Delay Note", notes, 1));
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "timeNote", 1 }, "Reverb Time Note", tnotes, 2));
     F ("preMs", "Pre-Delay", NRange (0.f, 250.f, 0.1f), 125.f, fmtMs);
     F ("timeMs", "Reverb Time", NRange (100.f, 16000.f, 1.f, 0.5f), 2000.f, fmtMs);
 
@@ -181,9 +181,9 @@ void TempoReverbProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     p.type = (int) get ("type");
     const bool sync = get ("sync") > 0.5f;
     const double barMs = 240000.0 / bpm;
-    p.predelayMs = sync ? (float) (bh::kNoteFrac[(int) get ("preNote")] * barMs) : get ("preMs");
+    p.predelayMs = sync ? (float) (bh::kPreFrac[juce::jlimit (0, bh::kNumPre - 1, (int) get ("preNote"))] * barMs) : get ("preMs");
     p.predelayMs = juce::jlimit (0.f, 250.f, p.predelayMs);
-    p.decay = sync ? (float) juce::jlimit (0.1, 32.0, bh::kTimeFrac[(int) get ("timeNote")] * barMs * 0.001 * bh::kTimeMul[p.type]) : get ("timeMs") * 0.001f;
+    p.decay = sync ? (float) juce::jlimit (0.1, 32.0, bh::kTimeFrac[juce::jlimit (0, bh::kNumTime - 1, (int) get ("timeNote"))] * barMs * 0.001) : get ("timeMs") * 0.001f;
     p.size = get ("size"); p.diffusion = get ("diffusion"); p.damping = get ("damping");
     p.mod = get ("modOn") > 0.5f ? get ("mod") : 0.f;
     p.width = get ("width") * 1.3f; p.tone = get ("tone"); p.character = bh::kCharacter[p.type];

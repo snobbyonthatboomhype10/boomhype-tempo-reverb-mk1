@@ -121,13 +121,14 @@ enum Type { Hall = 0, Plate, Room, Space, Spring, Shimmer, Cathedral, LoFi, NumT
 inline constexpr const char* kTypeNames[NumTypes] = { "HALL", "PLATE", "ROOM", "SPACE", "SPRING", "SHIMMER", "CATHEDRAL", "LO-FI" };
 
 // Note values are fractions of a whole note (1/1 = one bar of 4/4)
-inline constexpr const char* kNoteNames[9] = { "1/32", "1/16T", "1/16", "1/8T", "1/8", "1/4T", "1/4", "1/2", "1/1" };
-inline constexpr float kNoteFrac[9] = { 0.03125f, 0.0416667f, 0.0625f, 0.0833333f, 0.125f, 0.1666667f, 0.25f, 0.5f, 1.0f };
-
-// Reverb TIME can go longer than pre-delay: same notes, then 2, 3 and 4 bars
-inline constexpr int kNumTimeNotes = 12;
-inline constexpr const char* kTimeNames[12] = { "1/32", "1/16T", "1/16", "1/8T", "1/8", "1/4T", "1/4", "1/2", "1/1", "2 BAR", "3 BAR", "4 BAR" };
-inline constexpr float kTimeFrac[12] = { 0.03125f, 0.0416667f, 0.0625f, 0.0833333f, 0.125f, 0.1666667f, 0.25f, 0.5f, 1.0f, 2.0f, 3.0f, 4.0f };
+// ---- Tempo Helper logic, vocal sets only. Fractions are of ONE BAR (= 4 beats): ms = frac * 240000 / BPM
+//      pre-delay  : Tight 1/64, Medium 1/32, Wide 1/16
+//      reverb time: tail ends on the beat -> 1 beat, 2 beats, 1 bar, 2 bars, 4 bars
+inline constexpr int kNumPre = 3, kNumTime = 5;
+inline constexpr const char* kPreNames[3]  = { "TIGHT 1/64", "MEDIUM 1/32", "WIDE 1/16" };
+inline constexpr float kPreFrac[3]         = { 0.015625f, 0.03125f, 0.0625f };
+inline constexpr const char* kTimeNames[5] = { "1 BEAT", "2 BEATS", "1 BAR", "2 BARS", "4 BARS" };
+inline constexpr float kTimeFrac[5]        = { 0.25f, 0.5f, 1.0f, 2.0f, 4.0f };
 
 // Tempo-synced reverb time is the note length times this factor, so big spaces get big times at normal tempos
 inline constexpr float kTimeMul[NumTypes] = { 1.0f, 1.0f, 1.0f, 2.0f, 1.0f, 1.5f, 3.0f, 1.0f };
@@ -811,15 +812,15 @@ juce::AudioProcessorValueTreeState::ParameterLayout TempoReverbProcessor::create
 
     StringArray types, notes, slopes { "OFF", "6", "12", "24" };
     for (int i = 0; i < bh::NumTypes; ++i) types.add (bh::kTypeNames[i]);
-    for (int i = 0; i < 9; ++i) notes.add (bh::kNoteNames[i]);
+    for (int i = 0; i < bh::kNumPre; ++i) notes.add (bh::kPreNames[i]);
     StringArray tnotes;
-    for (int i = 0; i < bh::kNumTimeNotes; ++i) tnotes.add (bh::kTimeNames[i]);
+    for (int i = 0; i < bh::kNumTime; ++i) tnotes.add (bh::kTimeNames[i]);
 
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "type", 1 }, "Reverb Type", types, 0));
     B ("sync", "Tempo Sync", true);
     F ("bpm", "Manual Tempo", NRange (40.f, 240.f, 1.f), 120.f, fmtBpm);
-    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "preNote", 1 }, "Pre-Delay Note", notes, 2));
-    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "timeNote", 1 }, "Reverb Time Note", tnotes, 8));
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "preNote", 1 }, "Pre-Delay Note", notes, 1));
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { "timeNote", 1 }, "Reverb Time Note", tnotes, 2));
     F ("preMs", "Pre-Delay", NRange (0.f, 250.f, 0.1f), 125.f, fmtMs);
     F ("timeMs", "Reverb Time", NRange (100.f, 16000.f, 1.f, 0.5f), 2000.f, fmtMs);
 
@@ -960,9 +961,9 @@ void TempoReverbProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     p.type = (int) get ("type");
     const bool sync = get ("sync") > 0.5f;
     const double barMs = 240000.0 / bpm;
-    p.predelayMs = sync ? (float) (bh::kNoteFrac[(int) get ("preNote")] * barMs) : get ("preMs");
+    p.predelayMs = sync ? (float) (bh::kPreFrac[juce::jlimit (0, bh::kNumPre - 1, (int) get ("preNote"))] * barMs) : get ("preMs");
     p.predelayMs = juce::jlimit (0.f, 250.f, p.predelayMs);
-    p.decay = sync ? (float) juce::jlimit (0.1, 32.0, bh::kTimeFrac[(int) get ("timeNote")] * barMs * 0.001 * bh::kTimeMul[p.type]) : get ("timeMs") * 0.001f;
+    p.decay = sync ? (float) juce::jlimit (0.1, 32.0, bh::kTimeFrac[juce::jlimit (0, bh::kNumTime - 1, (int) get ("timeNote"))] * barMs * 0.001) : get ("timeMs") * 0.001f;
     p.size = get ("size"); p.diffusion = get ("diffusion"); p.damping = get ("damping");
     p.mod = get ("modOn") > 0.5f ? get ("mod") : 0.f;
     p.width = get ("width") * 1.3f; p.tone = get ("tone"); p.character = bh::kCharacter[p.type];
@@ -1139,6 +1140,14 @@ inline Font bhFont (float px, int which = 2, float kern = 0.f)
     return Font (FontOptions (h, which == 3 ? Font::plain : Font::bold));
 }
 
+// draws text and shrinks the font if it would be wider than the rectangle (nothing is ever clipped)
+inline void drawFit (Graphics& g, const String& t, Rectangle<float> r, Font f, Justification j)
+{
+    const float w = f.getStringWidthFloat (t);
+    if (w > r.getWidth() && w > 0.f) f = f.withHeight (f.getHeight() * r.getWidth() / w * 0.97f);
+    g.setFont (f); g.drawText (t, r, j, false);
+}
+
 inline Colour jewelRed() { return Colour (0xffff3b30); }
 
 //==============================================================================  3D knob (port of the HTML SVG knob)
@@ -1303,31 +1312,38 @@ public:
     }
     int skinType = 0; bool dimmed = false; String labelOverride;
 
-    // total design height of a cell for a knob of size S
+    // The cell is wider than the dial by PAD on each side, so the scale numbers and long labels (HIGH PASS...) never clip.
+    static constexpr float PAD = 22.f;
     static float cellH (float S, bool hasUnit = false) { return 15.f + S + 17.f + (hasUnit ? 14.f : 0.f); }
+
+    bool hitTest (int x, int y) override               // only the dial itself takes the mouse (neighbouring cells overlap)
+    {
+        const float k = (float) getWidth() / (S + 2.f * PAD);
+        return (float) x >= PAD * k && (float) x <= (PAD + S) * k && y >= 0 && y < getHeight();
+    }
 
     void paint (Graphics& g) override
     {
         const auto& sk = skinFor (skinType);
-        const float k = (float) getWidth() / S;
+        const float k = (float) getWidth() / (S + 2.f * PAD);          // pixels per design pixel
         Graphics::ScopedSaveState ss (g);
         if (dimmed) g.beginTransparencyLayer (0.36f);
-        g.setColour (sk.silk); g.setFont (bhFont (15.f * k, 2, 0.07f));
-        g.drawText ((labelOverride.isNotEmpty() ? labelOverride : label).toUpperCase(), Rectangle<float> (-20.f * k, 0.f, (float) getWidth() + 40.f * k, 15.f * k), Justification::centred, false);
+        g.setColour (sk.silk);
+        drawFit (g, (labelOverride.isNotEmpty() ? labelOverride : label).toUpperCase(), Rectangle<float> (0.f, 0.f, (float) getWidth(), 15.f * k), bhFont (15.f * k, 2, 0.07f), Justification::centred);
         {
             Graphics::ScopedSaveState s2 (g);
-            g.addTransform (AffineTransform::scale (k).translated (0.f, 15.f * k));
+            g.addTransform (AffineTransform::scale (k * S / 120.f).translated (PAD * k, 15.f * k));   // 120-unit dial box == S design px
             const auto cc = sk.caps[cap];
             const bool silver = cap == CapGray;
             drawScale (g, kind, silver ? sk.silk : cc.interpolatedWith (Colours::white, 0.5f), k);
             drawKnob3D (g, (float) valueToProportionOfLength (getValue()), cc.interpolatedWith (Colours::white, 0.5f), cc, cc.interpolatedWith (Colours::black, 0.58f), silver);
         }
-        g.setColour (isMouseButtonDown() ? sk.accent : sk.dim); g.setFont (bhFont (15.f * k, 1, 0.03f));
-        g.drawText (fmt ? fmt (getValue()) : String (getValue()), Rectangle<float> (-20.f * k, (15.f + S) * k, (float) getWidth() + 40.f * k, 17.f * k), Justification::centred, false);
+        g.setColour (isMouseButtonDown() ? sk.accent : sk.dim);
+        drawFit (g, fmt ? fmt (getValue()) : String (getValue()), Rectangle<float> (0.f, (15.f + S) * k, (float) getWidth(), 17.f * k), bhFont (15.f * k, 1, 0.03f), Justification::centred);
         if (unit.isNotEmpty())
         {
-            g.setColour (sk.dim); g.setFont (bhFont (14.f * k, 1, 0.07f));
-            g.drawText (unit, Rectangle<float> (0.f, (15.f + S + 15.f) * k, (float) getWidth(), 14.f * k), Justification::centred, false);
+            g.setColour (sk.dim);
+            drawFit (g, unit, Rectangle<float> (0.f, (15.f + S + 15.f) * k, (float) getWidth(), 14.f * k), bhFont (14.f * k, 1, 0.07f), Justification::centred);
         }
         if (dimmed) g.endTransparencyLayer();
     }
@@ -1430,6 +1446,40 @@ public:
         g.setColour (on ? Colours::white : Colour (0xff7c7660)); g.fillEllipse (dx - dr, c.y - dr, dr * 2.f, dr * 2.f);
         g.setColour (Colour (0xff2b261c)); g.setFont (bhFont (15.f * u, 2, 0.02f));
         g.drawText (getButtonText(), body.withTrimmedLeft (8.f * u), Justification::centred, false);
+        if (! isEnabled()) { g.setColour (Colours::black.withAlpha (0.35f)); g.fillRoundedRectangle (body, cr); }
+    }
+};
+
+//==============================================================================  preset row (Tempo Helper style: label on the left, live ms/s value on the right)
+class PresetRow : public Button
+{
+public:
+    explicit PresetRow (const String& t) : Button (t) { setMouseCursor (MouseCursor::PointingHandCursor); }
+    int skinType = 0; String value;
+    void setValue (const String& v) { if (v != value) { value = v; repaint(); } }
+    void paintButton (Graphics& g, bool, bool) override
+    {
+        const auto& sk = skinFor (skinType);
+        const auto b = getLocalBounds().toFloat(); const float u = b.getHeight() / 36.f;
+        const bool on = getToggleState(); const float lip = 3.f * u;
+        Rectangle<float> body (1.f, 1.f, b.getWidth() - 2.f, b.getHeight() - lip - 4.f * u);
+        if (on) body.translate (0.f, lip * 0.8f);
+        const float cr = 3.f * u;
+        g.setColour (Colours::black.withAlpha (0.5f)); g.fillRoundedRectangle (body.translated (0.f, lip + 2.f * u), cr);
+        if (! on) { g.setColour (Colour (0xff66655f)); g.fillRoundedRectangle (body.translated (0.f, lip), cr); g.setColour (Colour (0xff0a0a0a)); g.drawRoundedRectangle (body.translated (0.f, lip), cr, 1.f); }
+        if (on) { g.setColour (sk.accent.withAlpha (0.18f)); g.drawRoundedRectangle (body.expanded (3.f * u), cr + 3.f * u, 3.f * u); }
+        ColourGradient grad (on ? sk.accent.interpolatedWith (Colours::white, 0.22f) : Colours::white, 0.f, body.getY(), on ? sk.accent : Colour (0xffb5b2a6), 0.f, body.getBottom(), false);
+        if (! on) { grad.addColour (0.18, Colour (0xffecebe4)); grad.addColour (0.62, Colour (0xffd3d1c6)); }
+        g.setGradientFill (grad); g.fillRoundedRectangle (body, cr);
+        g.setColour (Colour (0xff060607)); g.drawRoundedRectangle (body, cr, 1.f);
+        const float dr = 3.f * u, cy = body.getCentreY();
+        g.setColour (on ? Colours::white : Colour (0xff7c7660)); g.fillEllipse (body.getX() + 13.f * u - dr, cy - dr, dr * 2.f, dr * 2.f);
+        g.setColour (on ? Colour (0xff1a1304) : Colour (0xff2b261c));
+        auto area = body.withTrimmedLeft (26.f * u).withTrimmedRight (12.f * u);
+        const float vw = bhFont (15.f * u, 1, 0.02f).getStringWidthFloat (value) + 2.f * u;
+        auto valArea = area.removeFromRight (vw);
+        drawFit (g, getButtonText(), area.withTrimmedRight (6.f * u), bhFont (15.f * u, 2, 0.04f), Justification::centredLeft);
+        drawFit (g, value, valArea, bhFont (15.f * u, 1, 0.02f), Justification::centredRight);
         if (! isEnabled()) { g.setColour (Colours::black.withAlpha (0.35f)); g.fillRoundedRectangle (body, cr); }
     }
 };
@@ -1578,13 +1628,13 @@ public:
         if (! isGR) { g.setColour (Colour (0xffc41a1a)); g.strokePath (arc (VR, 14.f, 42.f), PathStrokeType (4.5f, PathStrokeType::curved, PathStrokeType::rounded)); }
         struct M { const char* t; float a; bool red; };
         static const M om[] = { { "20", -55, 0 }, { "10", -42, 0 }, { "7", -30, 0 }, { "5", -20, 0 }, { "3", -11, 0 }, { "2", -4, 0 }, { "1", 4, 0 }, { "0", 14, 1 }, { "1", 24, 1 }, { "2", 33, 1 }, { "3", 42, 1 } };
-        static const M gm[] = { { "-20", -55, 0 }, { "-10", -42, 0 }, { "-7", -30, 0 }, { "-5", -20, 0 }, { "-3", -11, 0 }, { "-2", -4, 0 }, { "-1", 6, 0 }, { "0", 22, 0 } };
+        static const M gm[] = { { "20", -55, 0 }, { "10", -42, 0 }, { "7", -30, 0 }, { "5", -20, 0 }, { "3", -11, 0 }, { "2", -4, 0 }, { "1", 6, 0 }, { "0", 22, 0 } };
         const M* marks = isGR ? gm : om; const int nm = isGR ? 8 : 11;
         for (int i = 0; i < nm; ++i)
         {
             const auto p1 = vp (VR - 13.f, marks[i].a), p2 = vp (VR, marks[i].a), pl = vp (VR - 28.f, marks[i].a);
             g.setColour (marks[i].red ? Colour (0xffc41a1a) : Colour (0xff1a1a1a)); g.drawLine (Line<float> (p1, p2), 1.5f);
-            g.setFont (bhFont (14.5f, 2)); g.setColour (marks[i].red ? Colour (0xffc41a1a) : Colour (0xff0a0a0a));
+            g.setFont (bhFont (13.5f, 2)); g.setColour (marks[i].red ? Colour (0xffc41a1a) : Colour (0xff0a0a0a));
             g.drawText (marks[i].t, Rectangle<float> (pl.x - 16.f, pl.y - 9.f, 32.f, 18.f), Justification::centred, false);
         }
         g.setColour (Colour (0xff0a0a0a)); g.setFont (bhFont (20.f, 3, 0.05f));
@@ -1938,9 +1988,9 @@ private:
     std::vector<std::unique_ptr<SA>> sAtt;
     std::vector<std::unique_ptr<BA>> bAtt;
     std::array<ui::BellButton*, 8> prog {};
-    std::array<ui::NoteKey*, 12> timeKeys {};
-    std::array<ui::NoteKey*, 9> pdKeys {};
-    std::array<std::unique_ptr<ui::NoteKey>, 21> keyStore;
+    std::array<ui::PresetRow*, 5> timeKeys {};
+    std::array<ui::PresetRow*, 3> pdKeys {};
+    std::array<std::unique_ptr<ui::PresetRow>, 8> keyStore;
     std::array<ui::KnobComp*, 5> gainK {}, freqK {}, qK {};
     std::array<ui::BellButton*, 5> bandByp {};
     ui::KnobComp *modK = nullptr, *duckAmtK = nullptr, *duckSensK = nullptr, *duckRelK = nullptr;
@@ -1972,14 +2022,14 @@ struct Preset
     float hpF; int hpS; float lpF; int lpS; float eq[5][3];
 };
 const Preset kPresets[8] = {
-    /* HALL      */ { .78f, .65f, .45f, .85f, .40f, .55f, 8, 2, 2400, 125, 80.f, 2, 12000.f, 2, { { 60, .5f, 1.2f }, { 250, -.3f, 1.f }, { 1200, .2f, 1.4f }, { 4000, -.2f, 1.f }, { 10000, .3f, 1.1f } } },
-    /* PLATE     */ { .45f, .90f, .30f, .75f, .50f, .65f, 7, 0, 1800, 60, 100.f, 2, 14000.f, 1, { { 80, .2f, 1.f }, { 300, -.1f, 1.2f }, { 1000, .4f, 1.6f }, { 3500, .3f, 1.2f }, { 9000, -.2f, 1.f } } },
-    /* ROOM      */ { .30f, .55f, .55f, .60f, .30f, .50f, 6, 0, 550, 12, 120.f, 2, 11000.f, 2, { { 50, .3f, 1.f }, { 200, .1f, 1.f }, { 800, -.2f, 1.2f }, { 3000, .1f, 1.f }, { 12000, -.3f, 1.f } } },
-    /* SPACE     */ { .95f, .70f, .25f, .95f, .60f, .70f, 8, 4, 5000, 250, 40.f, 1, 16000.f, 1, { { 40, .6f, 1.4f }, { 180, .2f, 1.f }, { 900, -.1f, 1.2f }, { 3800, .4f, 1.4f }, { 12000, .2f, 1.f } } },
-    /* SPRING    */ { .20f, .40f, .60f, .45f, .80f, .40f, 7, 0, 1400, 12, 150.f, 3, 9000.f, 2, { { 100, .4f, 1.6f }, { 400, -.4f, 1.f }, { 1500, .5f, 2.f }, { 5000, -.3f, 1.f }, { 11000, .1f, 1.f } } },
-    /* SHIMMER   */ { .88f, .75f, .20f, .90f, .70f, .80f, 8, 4, 4500, 250, 60.f, 2, 16000.f, 1, { { 50, .2f, 1.f }, { 250, .3f, 1.2f }, { 1200, .5f, 1.4f }, { 5000, .6f, 1.6f }, { 14000, .4f, 1.f } } },
-    /* CATHEDRAL */ { .98f, .80f, .35f, .98f, .50f, .60f, 8, 3, 7000, 333, 35.f, 1, 13000.f, 2, { { 35, .7f, 1.4f }, { 150, .3f, 1.f }, { 700, -.2f, 1.2f }, { 2800, .2f, 1.2f }, { 10000, .5f, 1.f } } },
-    /* LO-FI     */ { .55f, .50f, .75f, .50f, .60f, .25f, 6, 2, 800, 125, 180.f, 2, 6500.f, 3, { { 120, .2f, 1.f }, { 350, -.5f, 1.f }, { 900, .3f, 1.2f }, { 2500, -.6f, 1.f }, { 8000, -.4f, 1.f } } }
+    /* HALL      */ { .78f, .65f, .45f, .85f, .40f, .55f, 2, 1, 2400, 125, 80.f, 2, 12000.f, 2, { { 60, .5f, 1.2f }, { 250, -.3f, 1.f }, { 1200, .2f, 1.4f }, { 4000, -.2f, 1.f }, { 10000, .3f, 1.1f } } },
+    /* PLATE     */ { .45f, .90f, .30f, .75f, .50f, .65f, 1, 0, 1800, 60, 100.f, 2, 14000.f, 1, { { 80, .2f, 1.f }, { 300, -.1f, 1.2f }, { 1000, .4f, 1.6f }, { 3500, .3f, 1.2f }, { 9000, -.2f, 1.f } } },
+    /* ROOM      */ { .30f, .55f, .55f, .60f, .30f, .50f, 0, 0, 550, 12, 120.f, 2, 11000.f, 2, { { 50, .3f, 1.f }, { 200, .1f, 1.f }, { 800, -.2f, 1.2f }, { 3000, .1f, 1.f }, { 12000, -.3f, 1.f } } },
+    /* SPACE     */ { .95f, .70f, .25f, .95f, .60f, .70f, 3, 2, 5000, 250, 40.f, 1, 16000.f, 1, { { 40, .6f, 1.4f }, { 180, .2f, 1.f }, { 900, -.1f, 1.2f }, { 3800, .4f, 1.4f }, { 12000, .2f, 1.f } } },
+    /* SPRING    */ { .20f, .40f, .60f, .45f, .80f, .40f, 1, 0, 1400, 12, 150.f, 3, 9000.f, 2, { { 100, .4f, 1.6f }, { 400, -.4f, 1.f }, { 1500, .5f, 2.f }, { 5000, -.3f, 1.f }, { 11000, .1f, 1.f } } },
+    /* SHIMMER   */ { .88f, .75f, .20f, .90f, .70f, .80f, 3, 2, 4500, 250, 60.f, 2, 16000.f, 1, { { 50, .2f, 1.f }, { 250, .3f, 1.2f }, { 1200, .5f, 1.4f }, { 5000, .6f, 1.6f }, { 14000, .4f, 1.f } } },
+    /* CATHEDRAL */ { .98f, .80f, .35f, .98f, .50f, .60f, 4, 2, 7000, 333, 35.f, 1, 13000.f, 2, { { 35, .7f, 1.4f }, { 150, .3f, 1.f }, { 700, -.2f, 1.2f }, { 2800, .2f, 1.2f }, { 10000, .5f, 1.f } } },
+    /* LO-FI     */ { .55f, .50f, .75f, .50f, .60f, .25f, 0, 1, 800, 125, 180.f, 2, 6500.f, 3, { { 120, .2f, 1.f }, { 350, -.5f, 1.f }, { 900, .3f, 1.2f }, { 2500, -.6f, 1.f }, { 8000, -.4f, 1.f } } }
 };
 
 String fmtF (double f) { return f >= 1000.0 ? String (f / 1000.0, f >= 10000.0 ? 1 : 2) + "k" : String (roundToInt (f)) + "Hz"; }
@@ -2031,21 +2081,19 @@ TempoReverbEditor::TempoReverbEditor (TempoReverbProcessor& p) : AudioProcessorE
     }
 
     // ---- tempo panel
-    for (int i = 0; i < bh::kNumTimeNotes; ++i)          // reverb time: 12 keys (1/32 ... 4 BAR)
+    for (int i = 0; i < bh::kNumTime; ++i)               // reverb time: tail ends on the beat (Tempo Helper)
     {
-        const float cx = 49.f + (float) (i % 3) * 77.7f, ry = (float) (i / 3) * 45.f;
-        keyStore[(size_t) i] = std::make_unique<NoteKey> (bh::kTimeNames[i]); timeKeys[(size_t) i] = keyStore[(size_t) i].get();
-        place (*timeKeys[(size_t) i], cx, 630.f + ry, 72.7f, 38);
+        keyStore[(size_t) i] = std::make_unique<PresetRow> (bh::kTimeNames[i]); timeKeys[(size_t) i] = keyStore[(size_t) i].get();
+        place (*timeKeys[(size_t) i], 49, 624.f + (float) i * 40.f, 228, 38);
         timeKeys[(size_t) i]->onClick = [this, i] { setP ("timeNote", (float) i); };
     }
-    for (int i = 0; i < 9; ++i)                           // pre-delay: 9 keys
+    for (int i = 0; i < bh::kNumPre; ++i)                // pre-delay: tight / medium / wide
     {
-        const float cx = 49.f + (float) (i % 3) * 77.7f, ry = (float) (i / 3) * 45.f;
-        keyStore[(size_t) (12 + i)] = std::make_unique<NoteKey> (bh::kNoteNames[i]); pdKeys[(size_t) i] = keyStore[(size_t) (12 + i)].get();
-        place (*pdKeys[(size_t) i], cx, 903.f + ry, 72.7f, 38);
+        keyStore[(size_t) (5 + i)] = std::make_unique<PresetRow> (bh::kPreNames[i]); pdKeys[(size_t) i] = keyStore[(size_t) (5 + i)].get();
+        place (*pdKeys[(size_t) i], 49, 902.f + (float) i * 40.f, 228, 38);
         pdKeys[(size_t) i]->onClick = [this, i] { setP ("preNote", (float) i); };
     }
-    place (timeLcd, 49, 813, 228, 36); place (pdLcd, 49, 1041, 228, 36);
+    place (timeLcd, 49, 826, 228, 34); place (pdLcd, 49, 1026, 228, 34);
 
     // ---- character
     {
@@ -2112,7 +2160,7 @@ KnobComp* TempoReverbEditor::addKnob (const String& id, const String& label, Sca
     auto k = std::make_unique<KnobComp> (label, kind, cap, size, std::move (fmt));
     sAtt.push_back (std::make_unique<SA> (proc.apvts, id, *k));
     if (auto* par = proc.apvts.getParameter (id)) k->setDoubleClickReturnValue (true, (double) par->convertFrom0to1 (par->getDefaultValue()));
-    place (*k, x, y, size, KnobComp::cellH (size));
+    place (*k, x - KnobComp::PAD, y, size + 2.f * KnobComp::PAD, KnobComp::cellH (size));
     knobs.push_back (std::move (k));
     return knobs.back().get();
 }
@@ -2176,9 +2224,18 @@ void TempoReverbEditor::timerCallback()
     abA->setToggleState (proc.abSlot() == 0, dontSendNotification); abB->setToggleState (proc.abSlot() == 1, dontSendNotification);
 
     const bool sync = proc.get ("sync") > 0.5f, host = proc.hostHasBpm.load();
-    const int tn = (int) proc.get ("timeNote"), pn = (int) proc.get ("preNote");
-    for (int i = 0; i < bh::kNumTimeNotes; ++i) { timeKeys[(size_t) i]->setToggleState (i == tn, dontSendNotification); timeKeys[(size_t) i]->setEnabled (sync); }
-    for (int i = 0; i < 9; ++i) { pdKeys[(size_t) i]->setToggleState (i == pn, dontSendNotification); pdKeys[(size_t) i]->setEnabled (sync); }
+    const int tn = jlimit (0, bh::kNumTime - 1, (int) proc.get ("timeNote")), pn = jlimit (0, bh::kNumPre - 1, (int) proc.get ("preNote"));
+    const double barMs = 240000.0 / jmax (20.0, (double) proc.bpmEff.load());
+    for (int i = 0; i < bh::kNumTime; ++i)
+    {
+        timeKeys[(size_t) i]->setToggleState (i == tn, dontSendNotification); timeKeys[(size_t) i]->setEnabled (sync);
+        timeKeys[(size_t) i]->setValue (String (bh::kTimeFrac[i] * barMs / 1000.0, 2) + " s");
+    }
+    for (int i = 0; i < bh::kNumPre; ++i)
+    {
+        pdKeys[(size_t) i]->setToggleState (i == pn, dontSendNotification); pdKeys[(size_t) i]->setEnabled (sync);
+        pdKeys[(size_t) i]->setValue (String (bh::kPreFrac[i] * barMs, 1) + " ms");
+    }
     hpChips.setSelected ((int) proc.get ("hpS")); lpChips.setSelected ((int) proc.get ("lpS")); prePost.setSelected (proc.get ("eqPost") > 0.5f ? 1 : 0);
 
     // readouts
@@ -2186,7 +2243,7 @@ void TempoReverbEditor::timerCallback()
     tempoLcd.set (host ? "HOST" : "TEMPO", String (roundToInt (bpm)), {}); tempoLcd.draggable = ! host; tempoLcd.editable = ! host;
     if (sync)
     {
-        timeLcd.set ({}, bh::kTimeNames[tn], fmtMsS (proc.effDecay.load() * 1000.0)); pdLcd.set ({}, bh::kNoteNames[pn], fmtMsS (proc.effPre.load()));
+        timeLcd.set ({}, bh::kTimeNames[tn], fmtMsS (proc.effDecay.load() * 1000.0)); pdLcd.set ({}, bh::kPreNames[pn], fmtMsS (proc.effPre.load()));
     }
     else
     {
@@ -2313,8 +2370,8 @@ void TempoReverbEditor::drawStatic (Graphics& g)
         curve (1.6f, Colours::black.withAlpha (0.75f), 2.2f); curve (0.f, sk.silk.withAlpha (0.78f), 1.5f);
     }
     g.setFont (bhFont (14.f, 2, 0.1f)); g.setColour (sk.silk);
-    g.drawText ("REVERB TIME", Rectangle<float> (38.f, 588.f, 250.f, 22.f), Justification::centred, false);
-    g.drawText ("PRE-DELAY", Rectangle<float> (38.f, 861.f, 250.f, 22.f), Justification::centred, false);
+    g.drawText ("REVERB TIME", Rectangle<float> (38.f, 596.f, 250.f, 22.f), Justification::centred, false);
+    g.drawText ("PRE-DELAY", Rectangle<float> (38.f, 872.f, 250.f, 22.f), Justification::centred, false);
     g.setFont (bhFont (14.5f, 2, 0.1f));
     g.drawText ("GAIN REDUCTION", Rectangle<float> (1020.f, 594.f, 250.f, 22.f), Justification::centredLeft, false);
     g.drawText ("OUTPUT LEVEL", Rectangle<float> (1486.f, 594.f, 250.f, 22.f), Justification::centredLeft, false);
@@ -2324,11 +2381,11 @@ void TempoReverbEditor::drawStatic (Graphics& g)
         const float cx = 700.f + 145.f;
         g.setFont (bhFont (31.f, 3)); g.setColour (Colours::black.withAlpha (0.7f)); g.drawText ("BoomHype", Rectangle<float> (700.f, 562.f, 290.f, 46.f), Justification::centred, false);
         g.setColour (sk.silk); g.drawText ("BoomHype", Rectangle<float> (700.f, 560.f, 290.f, 46.f), Justification::centred, false);
-        g.setFont (bhFont (13.f, 2, 0.14f)); g.setColour (sk.dim); g.drawText ("TECH  -  TEMPO REVERB  -  MK I", Rectangle<float> (700.f, 608.f, 290.f, 20.f), Justification::centred, false);
+        g.setColour (sk.dim); drawFit (g, "TECH  -  TEMPO REVERB  -  MK I", Rectangle<float> (712.f, 608.f, 266.f, 20.f), bhFont (13.f, 2, 0.10f), Justification::centred);
         for (float y : { 638.f, 746.f, 862.f }) { g.setColour (sk.silk.withAlpha (0.55f)); g.fillRect (cx - 113.f, y, 226.f, 1.5f); }
-        g.setFont (bhFont (13.f, 2, 0.09f)); g.setColour (sk.dim);
-        g.drawText ("DRAG BANDS - SCROLL = Q", Rectangle<float> (700.f, 876.f, 290.f, 20.f), Justification::centred, false);
-        g.drawText ("DOUBLE-CLICK A BAND = RESET GAIN", Rectangle<float> (700.f, 896.f, 290.f, 20.f), Justification::centred, false);
+        g.setColour (sk.dim);
+        drawFit (g, "DRAG BANDS - SCROLL = Q", Rectangle<float> (712.f, 876.f, 266.f, 20.f), bhFont (13.f, 2, 0.06f), Justification::centred);
+        drawFit (g, "DOUBLE-CLICK = RESET GAIN", Rectangle<float> (712.f, 896.f, 266.f, 20.f), bhFont (13.f, 2, 0.06f), Justification::centred);
     }
     // footer labels
     g.setFont (bhFont (14.f, 2, 0.09f)); g.setColour (sk.dim);
@@ -2402,7 +2459,7 @@ void TempoReverbEditor::paint (Graphics& g)
         String txt = String (bh::kTypeNames[t]);
         if (byp) txt = "BYPASSED";
         else if (proc.get ("freeze") > 0.5f) txt += "  |  FREEZE";
-        else txt += "  |  " + (sync ? String (bh::kTimeNames[(int) proc.get ("timeNote")]) : fmtMsS (proc.get ("timeMs"))) + "  |  " + String (roundToInt (proc.bpmEff.load())) + " BPM";
+        else txt += "  |  " + (sync ? String (bh::kTimeNames[jlimit (0, bh::kNumTime - 1, (int) proc.get ("timeNote"))]) : fmtMsS (proc.get ("timeMs"))) + "  |  " + String (roundToInt (proc.bpmEff.load())) + " BPM";
         g.setFont (bhFont (17.f, 1, 0.08f)); g.setColour (sk.accent.withAlpha (0.25f)); g.drawText (txt, r.translated (0.f, 1.f), Justification::centred, false);
         g.setColour (sk.accent); g.drawText (txt, r, Justification::centred, false);
     }

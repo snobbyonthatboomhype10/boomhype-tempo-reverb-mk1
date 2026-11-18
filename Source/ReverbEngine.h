@@ -29,13 +29,14 @@ enum Type { Hall = 0, Plate, Room, Space, Spring, Shimmer, Cathedral, LoFi, NumT
 inline constexpr const char* kTypeNames[NumTypes] = { "HALL", "PLATE", "ROOM", "SPACE", "SPRING", "SHIMMER", "CATHEDRAL", "LO-FI" };
 
 // Note values are fractions of a whole note (1/1 = one bar of 4/4)
-inline constexpr const char* kNoteNames[9] = { "1/32", "1/16T", "1/16", "1/8T", "1/8", "1/4T", "1/4", "1/2", "1/1" };
-inline constexpr float kNoteFrac[9] = { 0.03125f, 0.0416667f, 0.0625f, 0.0833333f, 0.125f, 0.1666667f, 0.25f, 0.5f, 1.0f };
-
-// Reverb TIME can go longer than pre-delay: same notes, then 2, 3 and 4 bars
-inline constexpr int kNumTimeNotes = 12;
-inline constexpr const char* kTimeNames[12] = { "1/32", "1/16T", "1/16", "1/8T", "1/8", "1/4T", "1/4", "1/2", "1/1", "2 BAR", "3 BAR", "4 BAR" };
-inline constexpr float kTimeFrac[12] = { 0.03125f, 0.0416667f, 0.0625f, 0.0833333f, 0.125f, 0.1666667f, 0.25f, 0.5f, 1.0f, 2.0f, 3.0f, 4.0f };
+// ---- Tempo Helper logic, vocal sets only. Fractions are of ONE BAR (= 4 beats): ms = frac * 240000 / BPM
+//      pre-delay  : Tight 1/64, Medium 1/32, Wide 1/16
+//      reverb time: tail ends on the beat -> 1 beat, 2 beats, 1 bar, 2 bars, 4 bars
+inline constexpr int kNumPre = 3, kNumTime = 5;
+inline constexpr const char* kPreNames[3]  = { "TIGHT 1/64", "MEDIUM 1/32", "WIDE 1/16" };
+inline constexpr float kPreFrac[3]         = { 0.015625f, 0.03125f, 0.0625f };
+inline constexpr const char* kTimeNames[5] = { "1 BEAT", "2 BEATS", "1 BAR", "2 BARS", "4 BARS" };
+inline constexpr float kTimeFrac[5]        = { 0.25f, 0.5f, 1.0f, 2.0f, 4.0f };
 
 // Tempo-synced reverb time is the note length times this factor, so big spaces get big times at normal tempos
 inline constexpr float kTimeMul[NumTypes] = { 1.0f, 1.0f, 1.0f, 2.0f, 1.0f, 1.5f, 3.0f, 1.0f };

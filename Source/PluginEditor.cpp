@@ -13,14 +13,14 @@ struct Preset
     float hpF; int hpS; float lpF; int lpS; float eq[5][3];
 };
 const Preset kPresets[8] = {
-    /* HALL      */ { .78f, .65f, .45f, .85f, .40f, .55f, 8, 2, 2400, 125, 80.f, 2, 12000.f, 2, { { 60, .5f, 1.2f }, { 250, -.3f, 1.f }, { 1200, .2f, 1.4f }, { 4000, -.2f, 1.f }, { 10000, .3f, 1.1f } } },
-    /* PLATE     */ { .45f, .90f, .30f, .75f, .50f, .65f, 7, 0, 1800, 60, 100.f, 2, 14000.f, 1, { { 80, .2f, 1.f }, { 300, -.1f, 1.2f }, { 1000, .4f, 1.6f }, { 3500, .3f, 1.2f }, { 9000, -.2f, 1.f } } },
-    /* ROOM      */ { .30f, .55f, .55f, .60f, .30f, .50f, 6, 0, 550, 12, 120.f, 2, 11000.f, 2, { { 50, .3f, 1.f }, { 200, .1f, 1.f }, { 800, -.2f, 1.2f }, { 3000, .1f, 1.f }, { 12000, -.3f, 1.f } } },
-    /* SPACE     */ { .95f, .70f, .25f, .95f, .60f, .70f, 8, 4, 5000, 250, 40.f, 1, 16000.f, 1, { { 40, .6f, 1.4f }, { 180, .2f, 1.f }, { 900, -.1f, 1.2f }, { 3800, .4f, 1.4f }, { 12000, .2f, 1.f } } },
-    /* SPRING    */ { .20f, .40f, .60f, .45f, .80f, .40f, 7, 0, 1400, 12, 150.f, 3, 9000.f, 2, { { 100, .4f, 1.6f }, { 400, -.4f, 1.f }, { 1500, .5f, 2.f }, { 5000, -.3f, 1.f }, { 11000, .1f, 1.f } } },
-    /* SHIMMER   */ { .88f, .75f, .20f, .90f, .70f, .80f, 8, 4, 4500, 250, 60.f, 2, 16000.f, 1, { { 50, .2f, 1.f }, { 250, .3f, 1.2f }, { 1200, .5f, 1.4f }, { 5000, .6f, 1.6f }, { 14000, .4f, 1.f } } },
-    /* CATHEDRAL */ { .98f, .80f, .35f, .98f, .50f, .60f, 8, 3, 7000, 333, 35.f, 1, 13000.f, 2, { { 35, .7f, 1.4f }, { 150, .3f, 1.f }, { 700, -.2f, 1.2f }, { 2800, .2f, 1.2f }, { 10000, .5f, 1.f } } },
-    /* LO-FI     */ { .55f, .50f, .75f, .50f, .60f, .25f, 6, 2, 800, 125, 180.f, 2, 6500.f, 3, { { 120, .2f, 1.f }, { 350, -.5f, 1.f }, { 900, .3f, 1.2f }, { 2500, -.6f, 1.f }, { 8000, -.4f, 1.f } } }
+    /* HALL      */ { .78f, .65f, .45f, .85f, .40f, .55f, 2, 1, 2400, 125, 80.f, 2, 12000.f, 2, { { 60, .5f, 1.2f }, { 250, -.3f, 1.f }, { 1200, .2f, 1.4f }, { 4000, -.2f, 1.f }, { 10000, .3f, 1.1f } } },
+    /* PLATE     */ { .45f, .90f, .30f, .75f, .50f, .65f, 1, 0, 1800, 60, 100.f, 2, 14000.f, 1, { { 80, .2f, 1.f }, { 300, -.1f, 1.2f }, { 1000, .4f, 1.6f }, { 3500, .3f, 1.2f }, { 9000, -.2f, 1.f } } },
+    /* ROOM      */ { .30f, .55f, .55f, .60f, .30f, .50f, 0, 0, 550, 12, 120.f, 2, 11000.f, 2, { { 50, .3f, 1.f }, { 200, .1f, 1.f }, { 800, -.2f, 1.2f }, { 3000, .1f, 1.f }, { 12000, -.3f, 1.f } } },
+    /* SPACE     */ { .95f, .70f, .25f, .95f, .60f, .70f, 3, 2, 5000, 250, 40.f, 1, 16000.f, 1, { { 40, .6f, 1.4f }, { 180, .2f, 1.f }, { 900, -.1f, 1.2f }, { 3800, .4f, 1.4f }, { 12000, .2f, 1.f } } },
+    /* SPRING    */ { .20f, .40f, .60f, .45f, .80f, .40f, 1, 0, 1400, 12, 150.f, 3, 9000.f, 2, { { 100, .4f, 1.6f }, { 400, -.4f, 1.f }, { 1500, .5f, 2.f }, { 5000, -.3f, 1.f }, { 11000, .1f, 1.f } } },
+    /* SHIMMER   */ { .88f, .75f, .20f, .90f, .70f, .80f, 3, 2, 4500, 250, 60.f, 2, 16000.f, 1, { { 50, .2f, 1.f }, { 250, .3f, 1.2f }, { 1200, .5f, 1.4f }, { 5000, .6f, 1.6f }, { 14000, .4f, 1.f } } },
+    /* CATHEDRAL */ { .98f, .80f, .35f, .98f, .50f, .60f, 4, 2, 7000, 333, 35.f, 1, 13000.f, 2, { { 35, .7f, 1.4f }, { 150, .3f, 1.f }, { 700, -.2f, 1.2f }, { 2800, .2f, 1.2f }, { 10000, .5f, 1.f } } },
+    /* LO-FI     */ { .55f, .50f, .75f, .50f, .60f, .25f, 0, 1, 800, 125, 180.f, 2, 6500.f, 3, { { 120, .2f, 1.f }, { 350, -.5f, 1.f }, { 900, .3f, 1.2f }, { 2500, -.6f, 1.f }, { 8000, -.4f, 1.f } } }
 };
 
 String fmtF (double f) { return f >= 1000.0 ? String (f / 1000.0, f >= 10000.0 ? 1 : 2) + "k" : String (roundToInt (f)) + "Hz"; }
@@ -72,21 +72,19 @@ TempoReverbEditor::TempoReverbEditor (TempoReverbProcessor& p) : AudioProcessorE
     }
 
     // ---- tempo panel
-    for (int i = 0; i < bh::kNumTimeNotes; ++i)          // reverb time: 12 keys (1/32 ... 4 BAR)
+    for (int i = 0; i < bh::kNumTime; ++i)               // reverb time: tail ends on the beat (Tempo Helper)
     {
-        const float cx = 49.f + (float) (i % 3) * 77.7f, ry = (float) (i / 3) * 45.f;
-        keyStore[(size_t) i] = std::make_unique<NoteKey> (bh::kTimeNames[i]); timeKeys[(size_t) i] = keyStore[(size_t) i].get();
-        place (*timeKeys[(size_t) i], cx, 630.f + ry, 72.7f, 38);
+        keyStore[(size_t) i] = std::make_unique<PresetRow> (bh::kTimeNames[i]); timeKeys[(size_t) i] = keyStore[(size_t) i].get();
+        place (*timeKeys[(size_t) i], 49, 624.f + (float) i * 40.f, 228, 38);
         timeKeys[(size_t) i]->onClick = [this, i] { setP ("timeNote", (float) i); };
     }
-    for (int i = 0; i < 9; ++i)                           // pre-delay: 9 keys
+    for (int i = 0; i < bh::kNumPre; ++i)                // pre-delay: tight / medium / wide
     {
-        const float cx = 49.f + (float) (i % 3) * 77.7f, ry = (float) (i / 3) * 45.f;
-        keyStore[(size_t) (12 + i)] = std::make_unique<NoteKey> (bh::kNoteNames[i]); pdKeys[(size_t) i] = keyStore[(size_t) (12 + i)].get();
-        place (*pdKeys[(size_t) i], cx, 903.f + ry, 72.7f, 38);
+        keyStore[(size_t) (5 + i)] = std::make_unique<PresetRow> (bh::kPreNames[i]); pdKeys[(size_t) i] = keyStore[(size_t) (5 + i)].get();
+        place (*pdKeys[(size_t) i], 49, 902.f + (float) i * 40.f, 228, 38);
         pdKeys[(size_t) i]->onClick = [this, i] { setP ("preNote", (float) i); };
     }
-    place (timeLcd, 49, 813, 228, 36); place (pdLcd, 49, 1041, 228, 36);
+    place (timeLcd, 49, 826, 228, 34); place (pdLcd, 49, 1026, 228, 34);
 
     // ---- character
     {
@@ -153,7 +151,7 @@ KnobComp* TempoReverbEditor::addKnob (const String& id, const String& label, Sca
     auto k = std::make_unique<KnobComp> (label, kind, cap, size, std::move (fmt));
     sAtt.push_back (std::make_unique<SA> (proc.apvts, id, *k));
     if (auto* par = proc.apvts.getParameter (id)) k->setDoubleClickReturnValue (true, (double) par->convertFrom0to1 (par->getDefaultValue()));
-    place (*k, x, y, size, KnobComp::cellH (size));
+    place (*k, x - KnobComp::PAD, y, size + 2.f * KnobComp::PAD, KnobComp::cellH (size));
     knobs.push_back (std::move (k));
     return knobs.back().get();
 }
@@ -217,9 +215,18 @@ void TempoReverbEditor::timerCallback()
     abA->setToggleState (proc.abSlot() == 0, dontSendNotification); abB->setToggleState (proc.abSlot() == 1, dontSendNotification);
 
     const bool sync = proc.get ("sync") > 0.5f, host = proc.hostHasBpm.load();
-    const int tn = (int) proc.get ("timeNote"), pn = (int) proc.get ("preNote");
-    for (int i = 0; i < bh::kNumTimeNotes; ++i) { timeKeys[(size_t) i]->setToggleState (i == tn, dontSendNotification); timeKeys[(size_t) i]->setEnabled (sync); }
-    for (int i = 0; i < 9; ++i) { pdKeys[(size_t) i]->setToggleState (i == pn, dontSendNotification); pdKeys[(size_t) i]->setEnabled (sync); }
+    const int tn = jlimit (0, bh::kNumTime - 1, (int) proc.get ("timeNote")), pn = jlimit (0, bh::kNumPre - 1, (int) proc.get ("preNote"));
+    const double barMs = 240000.0 / jmax (20.0, (double) proc.bpmEff.load());
+    for (int i = 0; i < bh::kNumTime; ++i)
+    {
+        timeKeys[(size_t) i]->setToggleState (i == tn, dontSendNotification); timeKeys[(size_t) i]->setEnabled (sync);
+        timeKeys[(size_t) i]->setValue (String (bh::kTimeFrac[i] * barMs / 1000.0, 2) + " s");
+    }
+    for (int i = 0; i < bh::kNumPre; ++i)
+    {
+        pdKeys[(size_t) i]->setToggleState (i == pn, dontSendNotification); pdKeys[(size_t) i]->setEnabled (sync);
+        pdKeys[(size_t) i]->setValue (String (bh::kPreFrac[i] * barMs, 1) + " ms");
+    }
     hpChips.setSelected ((int) proc.get ("hpS")); lpChips.setSelected ((int) proc.get ("lpS")); prePost.setSelected (proc.get ("eqPost") > 0.5f ? 1 : 0);
 
     // readouts
@@ -227,7 +234,7 @@ void TempoReverbEditor::timerCallback()
     tempoLcd.set (host ? "HOST" : "TEMPO", String (roundToInt (bpm)), {}); tempoLcd.draggable = ! host; tempoLcd.editable = ! host;
     if (sync)
     {
-        timeLcd.set ({}, bh::kTimeNames[tn], fmtMsS (proc.effDecay.load() * 1000.0)); pdLcd.set ({}, bh::kNoteNames[pn], fmtMsS (proc.effPre.load()));
+        timeLcd.set ({}, bh::kTimeNames[tn], fmtMsS (proc.effDecay.load() * 1000.0)); pdLcd.set ({}, bh::kPreNames[pn], fmtMsS (proc.effPre.load()));
     }
     else
     {
@@ -354,8 +361,8 @@ void TempoReverbEditor::drawStatic (Graphics& g)
         curve (1.6f, Colours::black.withAlpha (0.75f), 2.2f); curve (0.f, sk.silk.withAlpha (0.78f), 1.5f);
     }
     g.setFont (bhFont (14.f, 2, 0.1f)); g.setColour (sk.silk);
-    g.drawText ("REVERB TIME", Rectangle<float> (38.f, 588.f, 250.f, 22.f), Justification::centred, false);
-    g.drawText ("PRE-DELAY", Rectangle<float> (38.f, 861.f, 250.f, 22.f), Justification::centred, false);
+    g.drawText ("REVERB TIME", Rectangle<float> (38.f, 596.f, 250.f, 22.f), Justification::centred, false);
+    g.drawText ("PRE-DELAY", Rectangle<float> (38.f, 872.f, 250.f, 22.f), Justification::centred, false);
     g.setFont (bhFont (14.5f, 2, 0.1f));
     g.drawText ("GAIN REDUCTION", Rectangle<float> (1020.f, 594.f, 250.f, 22.f), Justification::centredLeft, false);
     g.drawText ("OUTPUT LEVEL", Rectangle<float> (1486.f, 594.f, 250.f, 22.f), Justification::centredLeft, false);
@@ -365,11 +372,11 @@ void TempoReverbEditor::drawStatic (Graphics& g)
         const float cx = 700.f + 145.f;
         g.setFont (bhFont (31.f, 3)); g.setColour (Colours::black.withAlpha (0.7f)); g.drawText ("BoomHype", Rectangle<float> (700.f, 562.f, 290.f, 46.f), Justification::centred, false);
         g.setColour (sk.silk); g.drawText ("BoomHype", Rectangle<float> (700.f, 560.f, 290.f, 46.f), Justification::centred, false);
-        g.setFont (bhFont (13.f, 2, 0.14f)); g.setColour (sk.dim); g.drawText ("TECH  -  TEMPO REVERB  -  MK I", Rectangle<float> (700.f, 608.f, 290.f, 20.f), Justification::centred, false);
+        g.setColour (sk.dim); drawFit (g, "TECH  -  TEMPO REVERB  -  MK I", Rectangle<float> (712.f, 608.f, 266.f, 20.f), bhFont (13.f, 2, 0.10f), Justification::centred);
         for (float y : { 638.f, 746.f, 862.f }) { g.setColour (sk.silk.withAlpha (0.55f)); g.fillRect (cx - 113.f, y, 226.f, 1.5f); }
-        g.setFont (bhFont (13.f, 2, 0.09f)); g.setColour (sk.dim);
-        g.drawText ("DRAG BANDS - SCROLL = Q", Rectangle<float> (700.f, 876.f, 290.f, 20.f), Justification::centred, false);
-        g.drawText ("DOUBLE-CLICK A BAND = RESET GAIN", Rectangle<float> (700.f, 896.f, 290.f, 20.f), Justification::centred, false);
+        g.setColour (sk.dim);
+        drawFit (g, "DRAG BANDS - SCROLL = Q", Rectangle<float> (712.f, 876.f, 266.f, 20.f), bhFont (13.f, 2, 0.06f), Justification::centred);
+        drawFit (g, "DOUBLE-CLICK = RESET GAIN", Rectangle<float> (712.f, 896.f, 266.f, 20.f), bhFont (13.f, 2, 0.06f), Justification::centred);
     }
     // footer labels
     g.setFont (bhFont (14.f, 2, 0.09f)); g.setColour (sk.dim);
@@ -443,7 +450,7 @@ void TempoReverbEditor::paint (Graphics& g)
         String txt = String (bh::kTypeNames[t]);
         if (byp) txt = "BYPASSED";
         else if (proc.get ("freeze") > 0.5f) txt += "  |  FREEZE";
-        else txt += "  |  " + (sync ? String (bh::kTimeNames[(int) proc.get ("timeNote")]) : fmtMsS (proc.get ("timeMs"))) + "  |  " + String (roundToInt (proc.bpmEff.load())) + " BPM";
+        else txt += "  |  " + (sync ? String (bh::kTimeNames[jlimit (0, bh::kNumTime - 1, (int) proc.get ("timeNote"))]) : fmtMsS (proc.get ("timeMs"))) + "  |  " + String (roundToInt (proc.bpmEff.load())) + " BPM";
         g.setFont (bhFont (17.f, 1, 0.08f)); g.setColour (sk.accent.withAlpha (0.25f)); g.drawText (txt, r.translated (0.f, 1.f), Justification::centred, false);
         g.setColour (sk.accent); g.drawText (txt, r, Justification::centred, false);
     }

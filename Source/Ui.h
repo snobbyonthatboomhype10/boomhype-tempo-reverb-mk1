@@ -72,6 +72,14 @@ inline Font bhFont (float px, int which = 2, float kern = 0.f)
     return Font (FontOptions (h, which == 3 ? Font::plain : Font::bold));
 }
 
+// draws text and shrinks the font if it would be wider than the rectangle (nothing is ever clipped)
+inline void drawFit (Graphics& g, const String& t, Rectangle<float> r, Font f, Justification j)
+{
+    const float w = f.getStringWidthFloat (t);
+    if (w > r.getWidth() && w > 0.f) f = f.withHeight (f.getHeight() * r.getWidth() / w * 0.97f);
+    g.setFont (f); g.drawText (t, r, j, false);
+}
+
 inline Colour jewelRed() { return Colour (0xffff3b30); }
 
 //==============================================================================  3D knob (port of the HTML SVG knob)
@@ -236,31 +244,38 @@ public:
     }
     int skinType = 0; bool dimmed = false; String labelOverride;
 
-    // total design height of a cell for a knob of size S
+    // The cell is wider than the dial by PAD on each side, so the scale numbers and long labels (HIGH PASS...) never clip.
+    static constexpr float PAD = 22.f;
     static float cellH (float S, bool hasUnit = false) { return 15.f + S + 17.f + (hasUnit ? 14.f : 0.f); }
+
+    bool hitTest (int x, int y) override               // only the dial itself takes the mouse (neighbouring cells overlap)
+    {
+        const float k = (float) getWidth() / (S + 2.f * PAD);
+        return (float) x >= PAD * k && (float) x <= (PAD + S) * k && y >= 0 && y < getHeight();
+    }
 
     void paint (Graphics& g) override
     {
         const auto& sk = skinFor (skinType);
-        const float k = (float) getWidth() / S;
+        const float k = (float) getWidth() / (S + 2.f * PAD);          // pixels per design pixel
         Graphics::ScopedSaveState ss (g);
         if (dimmed) g.beginTransparencyLayer (0.36f);
-        g.setColour (sk.silk); g.setFont (bhFont (15.f * k, 2, 0.07f));
-        g.drawText ((labelOverride.isNotEmpty() ? labelOverride : label).toUpperCase(), Rectangle<float> (-20.f * k, 0.f, (float) getWidth() + 40.f * k, 15.f * k), Justification::centred, false);
+        g.setColour (sk.silk);
+        drawFit (g, (labelOverride.isNotEmpty() ? labelOverride : label).toUpperCase(), Rectangle<float> (0.f, 0.f, (float) getWidth(), 15.f * k), bhFont (15.f * k, 2, 0.07f), Justification::centred);
         {
             Graphics::ScopedSaveState s2 (g);
-            g.addTransform (AffineTransform::scale (k).translated (0.f, 15.f * k));
+            g.addTransform (AffineTransform::scale (k * S / 120.f).translated (PAD * k, 15.f * k));   // 120-unit dial box == S design px
             const auto cc = sk.caps[cap];
             const bool silver = cap == CapGray;
             drawScale (g, kind, silver ? sk.silk : cc.interpolatedWith (Colours::white, 0.5f), k);
             drawKnob3D (g, (float) valueToProportionOfLength (getValue()), cc.interpolatedWith (Colours::white, 0.5f), cc, cc.interpolatedWith (Colours::black, 0.58f), silver);
         }
-        g.setColour (isMouseButtonDown() ? sk.accent : sk.dim); g.setFont (bhFont (15.f * k, 1, 0.03f));
-        g.drawText (fmt ? fmt (getValue()) : String (getValue()), Rectangle<float> (-20.f * k, (15.f + S) * k, (float) getWidth() + 40.f * k, 17.f * k), Justification::centred, false);
+        g.setColour (isMouseButtonDown() ? sk.accent : sk.dim);
+        drawFit (g, fmt ? fmt (getValue()) : String (getValue()), Rectangle<float> (0.f, (15.f + S) * k, (float) getWidth(), 17.f * k), bhFont (15.f * k, 1, 0.03f), Justification::centred);
         if (unit.isNotEmpty())
         {
-            g.setColour (sk.dim); g.setFont (bhFont (14.f * k, 1, 0.07f));
-            g.drawText (unit, Rectangle<float> (0.f, (15.f + S + 15.f) * k, (float) getWidth(), 14.f * k), Justification::centred, false);
+            g.setColour (sk.dim);
+            drawFit (g, unit, Rectangle<float> (0.f, (15.f + S + 15.f) * k, (float) getWidth(), 14.f * k), bhFont (14.f * k, 1, 0.07f), Justification::centred);
         }
         if (dimmed) g.endTransparencyLayer();
     }
@@ -363,6 +378,40 @@ public:
         g.setColour (on ? Colours::white : Colour (0xff7c7660)); g.fillEllipse (dx - dr, c.y - dr, dr * 2.f, dr * 2.f);
         g.setColour (Colour (0xff2b261c)); g.setFont (bhFont (15.f * u, 2, 0.02f));
         g.drawText (getButtonText(), body.withTrimmedLeft (8.f * u), Justification::centred, false);
+        if (! isEnabled()) { g.setColour (Colours::black.withAlpha (0.35f)); g.fillRoundedRectangle (body, cr); }
+    }
+};
+
+//==============================================================================  preset row (Tempo Helper style: label on the left, live ms/s value on the right)
+class PresetRow : public Button
+{
+public:
+    explicit PresetRow (const String& t) : Button (t) { setMouseCursor (MouseCursor::PointingHandCursor); }
+    int skinType = 0; String value;
+    void setValue (const String& v) { if (v != value) { value = v; repaint(); } }
+    void paintButton (Graphics& g, bool, bool) override
+    {
+        const auto& sk = skinFor (skinType);
+        const auto b = getLocalBounds().toFloat(); const float u = b.getHeight() / 36.f;
+        const bool on = getToggleState(); const float lip = 3.f * u;
+        Rectangle<float> body (1.f, 1.f, b.getWidth() - 2.f, b.getHeight() - lip - 4.f * u);
+        if (on) body.translate (0.f, lip * 0.8f);
+        const float cr = 3.f * u;
+        g.setColour (Colours::black.withAlpha (0.5f)); g.fillRoundedRectangle (body.translated (0.f, lip + 2.f * u), cr);
+        if (! on) { g.setColour (Colour (0xff66655f)); g.fillRoundedRectangle (body.translated (0.f, lip), cr); g.setColour (Colour (0xff0a0a0a)); g.drawRoundedRectangle (body.translated (0.f, lip), cr, 1.f); }
+        if (on) { g.setColour (sk.accent.withAlpha (0.18f)); g.drawRoundedRectangle (body.expanded (3.f * u), cr + 3.f * u, 3.f * u); }
+        ColourGradient grad (on ? sk.accent.interpolatedWith (Colours::white, 0.22f) : Colours::white, 0.f, body.getY(), on ? sk.accent : Colour (0xffb5b2a6), 0.f, body.getBottom(), false);
+        if (! on) { grad.addColour (0.18, Colour (0xffecebe4)); grad.addColour (0.62, Colour (0xffd3d1c6)); }
+        g.setGradientFill (grad); g.fillRoundedRectangle (body, cr);
+        g.setColour (Colour (0xff060607)); g.drawRoundedRectangle (body, cr, 1.f);
+        const float dr = 3.f * u, cy = body.getCentreY();
+        g.setColour (on ? Colours::white : Colour (0xff7c7660)); g.fillEllipse (body.getX() + 13.f * u - dr, cy - dr, dr * 2.f, dr * 2.f);
+        g.setColour (on ? Colour (0xff1a1304) : Colour (0xff2b261c));
+        auto area = body.withTrimmedLeft (26.f * u).withTrimmedRight (12.f * u);
+        const float vw = bhFont (15.f * u, 1, 0.02f).getStringWidthFloat (value) + 2.f * u;
+        auto valArea = area.removeFromRight (vw);
+        drawFit (g, getButtonText(), area.withTrimmedRight (6.f * u), bhFont (15.f * u, 2, 0.04f), Justification::centredLeft);
+        drawFit (g, value, valArea, bhFont (15.f * u, 1, 0.02f), Justification::centredRight);
         if (! isEnabled()) { g.setColour (Colours::black.withAlpha (0.35f)); g.fillRoundedRectangle (body, cr); }
     }
 };
@@ -511,13 +560,13 @@ public:
         if (! isGR) { g.setColour (Colour (0xffc41a1a)); g.strokePath (arc (VR, 14.f, 42.f), PathStrokeType (4.5f, PathStrokeType::curved, PathStrokeType::rounded)); }
         struct M { const char* t; float a; bool red; };
         static const M om[] = { { "20", -55, 0 }, { "10", -42, 0 }, { "7", -30, 0 }, { "5", -20, 0 }, { "3", -11, 0 }, { "2", -4, 0 }, { "1", 4, 0 }, { "0", 14, 1 }, { "1", 24, 1 }, { "2", 33, 1 }, { "3", 42, 1 } };
-        static const M gm[] = { { "-20", -55, 0 }, { "-10", -42, 0 }, { "-7", -30, 0 }, { "-5", -20, 0 }, { "-3", -11, 0 }, { "-2", -4, 0 }, { "-1", 6, 0 }, { "0", 22, 0 } };
+        static const M gm[] = { { "20", -55, 0 }, { "10", -42, 0 }, { "7", -30, 0 }, { "5", -20, 0 }, { "3", -11, 0 }, { "2", -4, 0 }, { "1", 6, 0 }, { "0", 22, 0 } };
         const M* marks = isGR ? gm : om; const int nm = isGR ? 8 : 11;
         for (int i = 0; i < nm; ++i)
         {
             const auto p1 = vp (VR - 13.f, marks[i].a), p2 = vp (VR, marks[i].a), pl = vp (VR - 28.f, marks[i].a);
             g.setColour (marks[i].red ? Colour (0xffc41a1a) : Colour (0xff1a1a1a)); g.drawLine (Line<float> (p1, p2), 1.5f);
-            g.setFont (bhFont (14.5f, 2)); g.setColour (marks[i].red ? Colour (0xffc41a1a) : Colour (0xff0a0a0a));
+            g.setFont (bhFont (13.5f, 2)); g.setColour (marks[i].red ? Colour (0xffc41a1a) : Colour (0xff0a0a0a));
             g.drawText (marks[i].t, Rectangle<float> (pl.x - 16.f, pl.y - 9.f, 32.f, 18.f), Justification::centred, false);
         }
         g.setColour (Colour (0xff0a0a0a)); g.setFont (bhFont (20.f, 3, 0.05f));

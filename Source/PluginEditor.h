@@ -41,9 +41,9 @@ private:
     std::vector<std::unique_ptr<SA>> sAtt;
     std::vector<std::unique_ptr<BA>> bAtt;
     std::array<ui::BellButton*, 8> prog {};
-    std::array<ui::NoteKey*, 12> timeKeys {};
-    std::array<ui::NoteKey*, 9> pdKeys {};
-    std::array<std::unique_ptr<ui::NoteKey>, 21> keyStore;
+    std::array<ui::PresetRow*, 5> timeKeys {};
+    std::array<ui::PresetRow*, 3> pdKeys {};
+    std::array<std::unique_ptr<ui::PresetRow>, 8> keyStore;
     std::array<ui::KnobComp*, 5> gainK {}, freqK {}, qK {};
     std::array<ui::BellButton*, 5> bandByp {};
     ui::KnobComp *modK = nullptr, *duckAmtK = nullptr, *duckSensK = nullptr, *duckRelK = nullptr;
