@@ -31,6 +31,30 @@ target_sources(TempoReverb PRIVATE
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp)
 
+# ---- fonts: Josefin Sans + Bevan (SIL OFL) are stored as .woff2 and converted to .ttf at configure time
+set(BH_FONTS_OK OFF)
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_FOUND)
+    execute_process(COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/woff2ttf.py
+                            ${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts ${CMAKE_BINARY_DIR}/fonts
+                    RESULT_VARIABLE BH_FONT_RC)
+    if(BH_FONT_RC EQUAL 0)
+        set(BH_FONTS_OK ON)
+    endif()
+endif()
+if(BH_FONTS_OK)
+    juce_add_binary_data(BHAssets SOURCES
+        ${CMAKE_BINARY_DIR}/fonts/Josefin500.ttf
+        ${CMAKE_BINARY_DIR}/fonts/Josefin600.ttf
+        ${CMAKE_BINARY_DIR}/fonts/Josefin700.ttf
+        ${CMAKE_BINARY_DIR}/fonts/Bevan400.ttf)
+    target_link_libraries(TempoReverb PRIVATE BHAssets)
+    target_compile_definitions(TempoReverb PUBLIC BH_HAS_FONTS=1)
+else()
+    message(WARNING "Font conversion failed - building with system fonts (plugin still works)")
+    target_compile_definitions(TempoReverb PUBLIC BH_HAS_FONTS=0)
+endif()
+
 target_compile_definitions(TempoReverb PUBLIC
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0

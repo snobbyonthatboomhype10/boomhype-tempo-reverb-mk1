@@ -17,6 +17,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Font tools
+        run: python -m pip install fonttools brotli
+
       - name: Linux dependencies
         if: runner.os == 'Linux'
         run: |
@@ -24,6 +31,12 @@ jobs:
           sudo apt-get install -y libasound2-dev libjack-jackd2-dev ladspa-sdk libcurl4-openssl-dev \
             libfreetype-dev libfontconfig1-dev libx11-dev libxcomposite-dev libxcursor-dev libxext-dev \
             libxinerama-dev libxrandr-dev libxrender-dev libglu1-mesa-dev mesa-common-dev
+
+      - name: Reverb DSP self-test (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          g++ -O2 -std=c++17 -o engine_test test/engine_test.cpp
+          ./engine_test
 
       - name: Configure (macOS universal)
         if: runner.os == 'macOS'

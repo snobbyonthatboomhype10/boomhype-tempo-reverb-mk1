@@ -2,393 +2,170 @@
 #include "PluginEditor.h"
 
 using namespace juce;
+using namespace ui;
 
-const Skin kSkins[bh::NumTypes] = {
-    { Colour (0xff2a2c31), Colour (0xff1a1b1f), Colour (0xff0d0e11), Colour (0xffe8b83a), false },  // Hall       black
-    { Colour (0xff2fd27a), Colour (0xff14a355), Colour (0xff065c2c), Colour (0xff9dffc4), false },  // Plate      green
-    { Colour (0xffff9a2e), Colour (0xffd9650a), Colour (0xff7a3300), Colour (0xffffc266), true  },  // Room       orange
-    { Colour (0xff3a8bff), Colour (0xff1b5fe0), Colour (0xff0a2f85), Colour (0xff9cc9ff), false },  // Space      blue
-    { Colour (0xffff5a4a), Colour (0xffd2281a), Colour (0xff7a0d06), Colour (0xffffb3a3), false },  // Spring     red
-    { Colour (0xffc24dff), Colour (0xff8f1fe0), Colour (0xff4a0a85), Colour (0xffefb8ff), false },  // Shimmer    purple
-    { Colour (0xffffd51f), Colour (0xfff2a300), Colour (0xffa85f00), Colour (0xffffb400), true  },  // Cathedral  yellow
-    { Colour (0xff1fc7c7), Colour (0xff0e9a9a), Colour (0xff055656), Colour (0xff9ff7f2), true  }   // Lo-Fi      teal
+//==============================================================================  presets (from the design)
+namespace
+{
+struct Preset
+{
+    float size, diff, damp, width, mod, tone; int timeNote, pdNote; float timeMs, pdMs;
+    float hpF; int hpS; float lpF; int lpS; float eq[5][3];
+};
+const Preset kPresets[8] = {
+    /* HALL      */ { .78f, .65f, .45f, .85f, .40f, .55f, 8, 2, 2400, 125, 80.f, 2, 12000.f, 2, { { 60, .5f, 1.2f }, { 250, -.3f, 1.f }, { 1200, .2f, 1.4f }, { 4000, -.2f, 1.f }, { 10000, .3f, 1.1f } } },
+    /* PLATE     */ { .45f, .90f, .30f, .75f, .50f, .65f, 7, 0, 1800, 60, 100.f, 2, 14000.f, 1, { { 80, .2f, 1.f }, { 300, -.1f, 1.2f }, { 1000, .4f, 1.6f }, { 3500, .3f, 1.2f }, { 9000, -.2f, 1.f } } },
+    /* ROOM      */ { .30f, .55f, .55f, .60f, .30f, .50f, 6, 0, 550, 12, 120.f, 2, 11000.f, 2, { { 50, .3f, 1.f }, { 200, .1f, 1.f }, { 800, -.2f, 1.2f }, { 3000, .1f, 1.f }, { 12000, -.3f, 1.f } } },
+    /* SPACE     */ { .95f, .70f, .25f, .95f, .60f, .70f, 8, 4, 5000, 250, 40.f, 1, 16000.f, 1, { { 40, .6f, 1.4f }, { 180, .2f, 1.f }, { 900, -.1f, 1.2f }, { 3800, .4f, 1.4f }, { 12000, .2f, 1.f } } },
+    /* SPRING    */ { .20f, .40f, .60f, .45f, .80f, .40f, 7, 0, 1400, 12, 150.f, 3, 9000.f, 2, { { 100, .4f, 1.6f }, { 400, -.4f, 1.f }, { 1500, .5f, 2.f }, { 5000, -.3f, 1.f }, { 11000, .1f, 1.f } } },
+    /* SHIMMER   */ { .88f, .75f, .20f, .90f, .70f, .80f, 8, 4, 4500, 250, 60.f, 2, 16000.f, 1, { { 50, .2f, 1.f }, { 250, .3f, 1.2f }, { 1200, .5f, 1.4f }, { 5000, .6f, 1.6f }, { 14000, .4f, 1.f } } },
+    /* CATHEDRAL */ { .98f, .80f, .35f, .98f, .50f, .60f, 8, 3, 7000, 333, 35.f, 1, 13000.f, 2, { { 35, .7f, 1.4f }, { 150, .3f, 1.f }, { 700, -.2f, 1.2f }, { 2800, .2f, 1.2f }, { 10000, .5f, 1.f } } },
+    /* LO-FI     */ { .55f, .50f, .75f, .50f, .60f, .25f, 6, 2, 800, 125, 180.f, 2, 6500.f, 3, { { 120, .2f, 1.f }, { 350, -.5f, 1.f }, { 900, .3f, 1.2f }, { 2500, -.6f, 1.f }, { 8000, -.4f, 1.f } } }
 };
 
-static Colour inkOf (const Skin& s) { return s.darkInk ? Colour (0xff1c1200) : Colour (0xfff2f2f2); }
-
-//==============================================================================
-void BHLook::drawRotarySlider (Graphics& g, int x, int y, int w, int h, float pos, float sa, float ea, Slider& s)
-{
-    const auto b = Rectangle<float> ((float) x, (float) y, (float) w, (float) h);
-    const float r = jmin (b.getWidth(), b.getHeight()) * 0.5f;
-    const auto c = b.getCentre();
-    const float kr = r * 0.62f, ringR = r * 0.80f, angle = sa + pos * (ea - sa);
-    const auto accent = skin->accent.withAlpha (s.isEnabled() ? 1.f : 0.35f);
-
-    g.setColour (inkOf (*skin).withAlpha (0.75f));                       // scale ticks
-    for (int i = 0; i <= 10; ++i)
-    {
-        const float a = sa + (ea - sa) * (float) i / 10.f;
-        g.drawLine (Line<float> (c.getPointOnCircumference (r * 0.90f, a), c.getPointOnCircumference (r * 0.99f, a)), jmax (1.f, r * 0.03f));
-    }
-    Path track, val;                                                       // value ring
-    track.addCentredArc (c.x, c.y, ringR, ringR, 0.f, sa, ea, true);
-    val.addCentredArc (c.x, c.y, ringR, ringR, 0.f, sa, angle, true);
-    g.setColour (Colours::black.withAlpha (0.45f)); g.strokePath (track, PathStrokeType (r * 0.07f));
-    g.setColour (accent);                          g.strokePath (val, PathStrokeType (r * 0.07f));
-
-    g.setColour (Colours::black.withAlpha (0.5f));                         // drop shadow
-    g.fillEllipse (c.x - kr, c.y - kr + r * 0.10f, kr * 2.f, kr * 2.f);
-    g.setColour (Colour (0xff0e0e0e));                                     // knurled skirt
-    g.fillEllipse (c.x - kr, c.y - kr, kr * 2.f, kr * 2.f);
-    for (int i = 0; i < 48; ++i)
-    {
-        const float a = (float) i * MathConstants<float>::twoPi / 48.f;
-        g.setColour (i % 2 ? Colour (0xff2b2b2b) : Colour (0xff6a6a6a));
-        g.drawLine (Line<float> (c.getPointOnCircumference (kr * 0.84f, a), c.getPointOnCircumference (kr, a)), jmax (1.f, kr * 0.11f));
-    }
-    const float cr = kr * 0.84f;                                           // chrome cap
-    g.setGradientFill (ColourGradient (Colour (0xfffbfbfb), c.x - cr * 0.4f, c.y - cr * 0.5f, Colour (0xff6d6d6d), c.x + cr * 0.7f, c.y + cr * 0.8f, true));
-    g.fillEllipse (c.x - cr, c.y - cr, cr * 2.f, cr * 2.f);
-    const float ir = cr * 0.62f;
-    g.setGradientFill (ColourGradient (Colour (0xff8a8a8a), c.x - ir * 0.5f, c.y - ir * 0.6f, Colour (0xffeeeeee), c.x + ir * 0.6f, c.y + ir * 0.7f, true));
-    g.fillEllipse (c.x - ir, c.y - ir, ir * 2.f, ir * 2.f);
-    g.setColour (Colours::white.withAlpha (0.55f)); g.drawEllipse (c.x - cr, c.y - cr, cr * 2.f, cr * 2.f, 1.f);
-
-    Path ptr;                                                              // pointer
-    ptr.addRoundedRectangle (-kr * 0.045f, -kr * 0.86f, kr * 0.09f, kr * 0.46f, kr * 0.04f);
-    g.setColour (Colour (0xff14100b));
-    g.fillPath (ptr, AffineTransform::rotation (angle).translated (c.x, c.y));
-}
-
-void BHLook::drawButtonBackground (Graphics& g, Button& b, const Colour&, bool, bool down)
-{
-    auto r = b.getLocalBounds().toFloat().reduced (1.f);
-    const float cr = r.getHeight() * 0.18f;
-    const bool on = b.getToggleState();
-    g.setColour (Colours::black.withAlpha (0.4f)); g.fillRoundedRectangle (r.translated (0.f, 1.5f), cr);
-    Colour top = on ? skin->accent.brighter (0.5f) : Colour (0xfff6f3ea), bot = on ? skin->accent.darker (0.15f) : Colour (0xffb7b4a6);
-    if (down) { top = top.darker (0.1f); bot = bot.darker (0.1f); }
-    g.setGradientFill (ColourGradient (top, 0.f, r.getY(), bot, 0.f, r.getBottom(), false));
-    g.fillRoundedRectangle (r, cr);
-    g.setColour (Colours::black.withAlpha (0.55f)); g.drawRoundedRectangle (r, cr, 1.f);
-    if (on) { g.setColour (skin->accent.withAlpha (0.35f)); g.drawRoundedRectangle (r.expanded (1.5f), cr, 2.f); }
-}
-
-void BHLook::drawButtonText (Graphics& g, TextButton& b, bool, bool)
-{
-    g.setFont (getTextButtonFont (b, b.getHeight()));
-    g.setColour (Colour (0xff241c0e).withAlpha (b.isEnabled() ? 1.f : 0.4f));
-    g.drawText (b.getButtonText(), b.getLocalBounds(), Justification::centred, false);
+String fmtF (double f) { return f >= 1000.0 ? String (f / 1000.0, f >= 10000.0 ? 1 : 2) + "k" : String (roundToInt (f)) + "Hz"; }
+String fmtG (double g) { return String (g >= 0.0 ? "+" : "") + String (g, 1) + "dB"; }
+String fmtPct (double v) { return String (roundToInt (v * 100.0)) + "%"; }
+String fmtMsS (double ms) { return ms >= 1000.0 ? String (ms / 1000.0, 2) + " s" : String (roundToInt (ms)) + " ms"; }
 }
 
 //==============================================================================
-float VuMeter::angleFor (float v) const
+TempoReverbEditor::TempoReverbEditor (TempoReverbProcessor& p) : AudioProcessorEditor (&p), proc (p), eq (p)
 {
-    static const float gv[] = { -20, -10, -7, -5, -3, -2, -1, 0 },              ga[] = { -55, -42, -30, -20, -11, -4, 6, 22 };
-    static const float vv[] = { -20, -10, -7, -5, -3, -2, -1, 0, 1, 2, 3 },     va[] = { -55, -42, -30, -20, -11, -4, 4, 14, 24, 33, 42 };
-    const float* vals = isGR ? gv : vv; const float* angs = isGR ? ga : va; const int n = isGR ? 8 : 11;
-    v = jlimit (vals[0], vals[n - 1], v);
-    for (int i = 0; i < n - 1; ++i)
-        if (v <= vals[i + 1]) return angs[i] + (v - vals[i]) / (vals[i + 1] - vals[i]) * (angs[i + 1] - angs[i]);
-    return angs[n - 1];
-}
+    // ---- header
+    place (tempoLcd, 1406, 12, 120, 44);
+    addToggle ("SYNC", "sync", 1540, 16, 96, 36);
+    abA = addToggle ("A", {}, 1650, 16, 62, 36, true, 15.5f); abB = addToggle ("B", {}, 1726, 16, 62, 36, true, 15.5f);
+    abA->setClickingTogglesState (false); abB->setClickingTogglesState (false);
+    abA->onClick = [this] { proc.abSwitch (0); }; abB->onClick = [this] { proc.abSwitch (1); };
+    addToggle ("BYPASS", "bypass", 1802, 16, 122, 36);
 
-void VuMeter::paint (Graphics& g)
-{
-    auto b = getLocalBounds().toFloat();
-    const float h = b.getHeight();
-    g.setColour (Colour (0xff0b0c0e)); g.fillRoundedRectangle (b, h * 0.05f);
-    g.setColour (Colour (0xff3a3a3a)); g.drawRoundedRectangle (b.reduced (1.f), h * 0.05f, 1.f);
-    auto face = b.reduced (h * 0.05f);
-    g.setGradientFill (ColourGradient (Colour (0xfffbf7e6), face.getCentreX(), face.getBottom(), Colour (0xffcfc7ae), face.getX(), face.getY(), true));
-    g.fillRect (face);
-    g.setGradientFill (ColourGradient (Colours::black.withAlpha (0.28f), 0.f, face.getY(), Colours::transparentBlack, 0.f, face.getY() + h * 0.3f, false));
-    g.fillRect (face);
-
-    Graphics::ScopedSaveState ss (g);
-    g.reduceClipRegion (face.toNearestInt());
-    const float cx = face.getCentreX(), cy = face.getBottom() - h * 0.05f, R = face.getHeight() * 0.86f;
-    auto pt = [&] (float deg, float rad) { const float a = degreesToRadians (deg); return Point<float> (cx + rad * std::sin (a), cy - rad * std::cos (a)); };
-
-    static const float gv[] = { -20, -10, -7, -5, -3, -2, -1, 0 };
-    static const float vv[] = { -20, -10, -7, -5, -3, -2, -1, 0, 1, 2, 3 };
-    const float* vals = isGR ? gv : vv; const int n = isGR ? 8 : 11;
-    const float aMin = angleFor (vals[0]), aMax = angleFor (vals[n - 1]);
-
-    if (! isGR)
-    {
-        Path red; red.addCentredArc (cx, cy, R, R, 0.f, degreesToRadians (angleFor (0.f)), degreesToRadians (aMax), true);
-        g.setColour (Colour (0xffd81414)); g.strokePath (red, PathStrokeType (h * 0.045f));
-    }
-    Path arc; arc.addCentredArc (cx, cy, R, R, 0.f, degreesToRadians (aMin), degreesToRadians (aMax), true);
-    g.setColour (Colour (0xff111111)); g.strokePath (arc, PathStrokeType (h * 0.016f));
-
-    g.setFont (bhFont (h * 0.105f));
-    for (int i = 0; i < n; ++i)
-    {
-        const float a = angleFor (vals[i]);
-        const bool red = ! isGR && vals[i] > 0.f;
-        g.setColour (red ? Colour (0xffd81414) : Colour (0xff111111));
-        g.drawLine (Line<float> (pt (a, R - h * 0.07f), pt (a, R + h * 0.02f)), h * 0.018f);
-        const auto tp = pt (a, R + h * 0.13f);
-        String t = isGR ? (vals[i] == 0.f ? "0" : String ((int) vals[i])) : String ((int) std::abs (vals[i]));
-        g.drawText (t, Rectangle<float> (tp.x - h * 0.15f, tp.y - h * 0.07f, h * 0.3f, h * 0.14f), Justification::centred, false);
-    }
-    g.setColour (Colour (0xff111111)); g.setFont (bhFont (h * 0.22f));
-    g.drawText (isGR ? "GR" : "VU", Rectangle<float> (cx - h * 0.4f, cy - R * 0.62f, h * 0.8f, h * 0.26f), Justification::centred, false);
-
-    const float a = angleFor (needle);
-    g.setColour (Colours::black.withAlpha (0.25f)); g.drawLine (Line<float> (cx + h * 0.02f, cy, pt (a, R * 0.98f).x + h * 0.025f, pt (a, R * 0.98f).y), h * 0.016f);
-    g.setColour (Colour (0xff111111)); g.drawLine (Line<float> (Point<float> (cx, cy), pt (a, R * 0.98f)), h * 0.016f);
-    g.setColour (Colour (0xff050505)); g.fillEllipse (cx - h * 0.1f, cy - h * 0.1f, h * 0.2f, h * 0.2f);
-}
-
-//==============================================================================
-EqDisplay::EqDisplay (TempoReverbProcessor& p)
-    : proc (p), fft (TempoReverbProcessor::fftOrder),
-      window ((size_t) TempoReverbProcessor::fftSize, dsp::WindowingFunction<float>::hann)
-{
-    spec.fill (-120.f); fftData.fill (0.f);
-}
-
-void EqDisplay::setP (const String& id, float plain)
-{
-    if (auto* p = proc.apvts.getParameter (id)) p->setValueNotifyingHost (p->convertTo0to1 (plain));
-}
-void EqDisplay::gesture (const String& id, bool begin)
-{
-    if (auto* p = proc.apvts.getParameter (id)) { if (begin) p->beginChangeGesture(); else p->endChangeGesture(); }
-}
-
-Point<float> EqDisplay::nodePos (int i) const
-{
-    if (i < 5) return { fToX (proc.get ("f" + String (i))), gToY (proc.get ("g" + String (i))) };
-    return { fToX (i == 5 ? proc.get ("hpFreq") : proc.get ("lpFreq")), gToY (0.f) };
-}
-int EqDisplay::nearestNode (Point<float> p, float maxDist) const
-{
-    int best = -1; float bd = maxDist;
-    for (int i = 0; i < 7; ++i) { const float d = nodePos (i).getDistanceFrom (p); if (d < bd) { bd = d; best = i; } }
-    return best;
-}
-
-void EqDisplay::tick()
-{
-    if (proc.fftReady.exchange (false))
-    {
-        std::copy (proc.fftSnapshot.begin(), proc.fftSnapshot.end(), fftData.begin());
-        std::fill (fftData.begin() + TempoReverbProcessor::fftSize, fftData.end(), 0.f);
-        window.multiplyWithWindowingTable (fftData.data(), (size_t) TempoReverbProcessor::fftSize);
-        fft.performFrequencyOnlyForwardTransform (fftData.data());
-        for (size_t i = 0; i < spec.size(); ++i)
-        {
-            const float db = Decibels::gainToDecibels (fftData[i] / ((float) TempoReverbProcessor::fftSize * 0.25f), -120.f);
-            spec[i] += (db - spec[i]) * (db > spec[i] ? 0.45f : 0.10f);      // fast attack, slow fall = smooth
-        }
-    }
-    repaint();
-}
-
-void EqDisplay::paint (Graphics& g)
-{
-    const float sc = (float) getHeight() / 190.f;
-    const auto accent = skin->accent;
-    auto full = getLocalBounds().toFloat(); auto r = area();
-    g.setColour (Colour (0xff060708)); g.fillRoundedRectangle (full, 22.f * sc);
-    g.setColour (Colour (0xff2a2c30)); g.drawRoundedRectangle (full.reduced (1.f), 22.f * sc, 2.f);
-    Graphics::ScopedSaveState ss (g);
-    { Path clip; clip.addRoundedRectangle (full.reduced (3.f), 20.f * sc); g.reduceClipRegion (clip); }
-
-    // grid
-    g.setFont (bhFont (9.f * sc, false));
-    for (float f : { 50.f, 100.f, 200.f, 500.f, 1000.f, 2000.f, 5000.f, 10000.f })
-    {
-        const float x = fToX (f);
-        g.setColour (Colours::white.withAlpha (f == 100.f || f == 1000.f || f == 10000.f ? 0.14f : 0.06f));
-        g.drawVerticalLine ((int) x, r.getY(), r.getBottom());
-        g.setColour (Colours::white.withAlpha (0.35f));
-        g.drawText (f >= 1000.f ? String ((int) (f / 1000.f)) + "k" : String ((int) f), Rectangle<float> (x + 2.f, r.getBottom() - 14.f * sc, 30.f * sc, 12.f * sc), Justification::left, false);
-    }
-    for (int db : { -12, -6, 0, 6, 12 })
-    {
-        const float y = gToY ((float) db);
-        g.setColour (Colours::white.withAlpha (db == 0 ? 0.20f : 0.07f)); g.drawHorizontalLine ((int) y, r.getX(), r.getRight());
-        g.setColour (Colours::white.withAlpha (0.35f)); g.drawText (db > 0 ? "+" + String (db) : String (db), Rectangle<float> (r.getX() + 4.f * sc, y - 12.f * sc, 30.f * sc, 11.f * sc), Justification::left, false);
-    }
-
-    // analyser (smoothed across frequency + time)
-    double sr = proc.getSampleRate(); if (sr <= 0.0) sr = 44100.0;
-    Path sp; bool first = true;
-    for (float x = r.getX(); x <= r.getRight(); x += 2.f)
-    {
-        const float binF = xToF (x) / (float) (sr * 0.5) * (float) spec.size();
-        const int i0 = jmax (1, (int) (binF * 0.93f)), i1 = jmin ((int) spec.size() - 1, (int) (binF * 1.07f) + 1);
-        float sum = 0.f; int cnt = 0;
-        for (int i = i0; i <= i1; ++i) { sum += spec[(size_t) i]; ++cnt; }
-        const float db = cnt ? sum / (float) cnt : -120.f;
-        const float y = r.getBottom() - jlimit (0.f, 1.f, (db + 90.f) / 80.f) * r.getHeight() * 0.9f;
-        if (first) { sp.startNewSubPath (x, y); first = false; } else sp.lineTo (x, y);
-    }
-    Path fill (sp); fill.lineTo (r.getRight(), r.getBottom()); fill.lineTo (r.getX(), r.getBottom()); fill.closeSubPath();
-    g.setGradientFill (ColourGradient (accent.withAlpha (0.45f), 0.f, r.getY(), accent.withAlpha (0.03f), 0.f, r.getBottom(), false));
-    g.fillPath (fill);
-    g.setColour (accent.withAlpha (0.55f)); g.strokePath (sp, PathStrokeType (1.2f * sc, PathStrokeType::curved));
-
-    // response curve
-    const auto hpC = bh::makeHP (sr, proc.get ("hpFreq")), lpC = bh::makeLP (sr, proc.get ("lpFreq"));
-    const bool hpOn = proc.get ("hpOn") > 0.5f, lpOn = proc.get ("lpOn") > 0.5f;
-    bh::BiquadCoeffs bc[5]; bool bon[5];
-    for (int i = 0; i < 5; ++i)
-    {
-        const String n (i);
-        bon[i] = proc.get ("b" + n) < 0.5f;
-        bc[i] = bh::makePeak (sr, proc.get ("f" + n), proc.get ("q" + n), proc.get ("g" + n));
-    }
-    Path curve; first = true;
-    for (float x = r.getX(); x <= r.getRight(); x += 2.f)
-    {
-        const double f = xToF (x); double db = 0.0;
-        if (hpOn) db += bh::magnitudeDb (hpC, sr, f);
-        if (lpOn) db += bh::magnitudeDb (lpC, sr, f);
-        for (int i = 0; i < 5; ++i) if (bon[i]) db += bh::magnitudeDb (bc[i], sr, f);
-        const float y = jlimit (r.getY(), r.getBottom(), gToY ((float) db));
-        if (first) { curve.startNewSubPath (x, y); first = false; } else curve.lineTo (x, y);
-    }
-    g.setColour (accent.withAlpha (0.25f)); g.strokePath (curve, PathStrokeType (6.f * sc, PathStrokeType::curved));
-    g.setColour (Colours::white);           g.strokePath (curve, PathStrokeType (2.2f * sc, PathStrokeType::curved));
-
-    // nodes
-    static const Colour bandCol[5] = { Colour (0xff4a8cff), Colour (0xff3fcf6a), Colour (0xffffd23a), Colour (0xffff8a2a), Colour (0xffff4a4a) };
-    static const char* bandName[5] = { "1", "2", "3", "4", "5" };
-    for (int i = 0; i < 7; ++i)
-    {
-        const auto p = nodePos (i);
-        const bool active = i < 5 ? proc.get ("b" + String (i)) < 0.5f : proc.get (i == 5 ? "hpOn" : "lpOn") > 0.5f;
-        const Colour c = i < 5 ? bandCol[i] : Colour (0xffd0d0d0);
-        const float rad = 9.f * sc;
-        g.setColour (Colours::black.withAlpha (0.5f)); g.fillEllipse (p.x - rad, p.y - rad + 2.f, rad * 2.f, rad * 2.f);
-        g.setColour (active ? c : c.withAlpha (0.35f)); g.fillEllipse (p.x - rad, p.y - rad, rad * 2.f, rad * 2.f);
-        g.setColour (i == selected ? Colours::white : Colours::black.withAlpha (0.8f)); g.drawEllipse (p.x - rad, p.y - rad, rad * 2.f, rad * 2.f, 1.5f * sc);
-        g.setColour (Colours::black); g.setFont (bhFont (9.f * sc));
-        g.drawText (i < 5 ? bandName[i] : (i == 5 ? "HP" : "LP"), Rectangle<float> (p.x - rad, p.y - rad, rad * 2.f, rad * 2.f), Justification::centred, false);
-    }
-}
-
-void EqDisplay::mouseDown (const MouseEvent& e)
-{
-    dragNode = nearestNode (e.position, 20.f * (float) getHeight() / 190.f);
-    if (dragNode < 0) return;
-    if (dragNode < 5) { selected = dragNode; const String n (dragNode); gesture ("f" + n, true); gesture ("g" + n, true); setP ("b" + n, 0.f); }
-    else gesture (dragNode == 5 ? "hpFreq" : "lpFreq", true);
-}
-void EqDisplay::mouseDrag (const MouseEvent& e)
-{
-    if (dragNode < 0) return;
-    const float f = xToF (e.position.x);
-    if (dragNode < 5) { const String n (dragNode); setP ("f" + n, f); setP ("g" + n, yToG (e.position.y)); }
-    else if (dragNode == 5) setP ("hpFreq", jlimit (20.f, 1000.f, f));
-    else setP ("lpFreq", jlimit (2000.f, 20000.f, f));
-}
-void EqDisplay::mouseUp (const MouseEvent&)
-{
-    if (dragNode >= 0)
-    {
-        if (dragNode < 5) { const String n (dragNode); gesture ("f" + n, false); gesture ("g" + n, false); }
-        else gesture (dragNode == 5 ? "hpFreq" : "lpFreq", false);
-    }
-    dragNode = -1;
-}
-void EqDisplay::mouseDoubleClick (const MouseEvent& e)
-{
-    const int n = nearestNode (e.position, 24.f * (float) getHeight() / 190.f);
-    if (n < 0) return;
-    if (n < 5) { const String id = "b" + String (n); setP (id, proc.get (id) > 0.5f ? 0.f : 1.f); }
-    else { const String id = n == 5 ? "hpOn" : "lpOn"; setP (id, proc.get (id) > 0.5f ? 0.f : 1.f); }
-}
-void EqDisplay::mouseWheelMove (const MouseEvent& e, const MouseWheelDetails& w)
-{
-    int n = nearestNode (e.position, 60.f * (float) getHeight() / 190.f);
-    if (n < 0 || n > 4) n = selected;
-    const String id = "q" + String (n);
-    setP (id, jlimit (0.3f, 8.f, proc.get (id) * std::exp (w.deltaY * 0.8f)));
-}
-
-//==============================================================================
-TempoReverbEditor::TempoReverbEditor (TempoReverbProcessor& p)
-    : AudioProcessorEditor (&p), proc (p), eq (p)
-{
-    setLookAndFeel (&laf);
-
+    // ---- programs
     for (int i = 0; i < bh::NumTypes; ++i)
     {
-        typeBtn[(size_t) i].setButtonText (bh::kTypeNames[i]);
-        typeBtn[(size_t) i].onClick = [this, i] { selectType (i); };
-        addAndMakeVisible (typeBtn[(size_t) i]);
+        prog[(size_t) i] = addToggle (bh::kTypeNames[i], {}, 36.f + (float) i * 237.5f, 84, 225.5f, 44);
+        prog[(size_t) i]->setClickingTogglesState (false);
+        prog[(size_t) i]->onClick = [this, i] { selectProgram (i); };
     }
 
-    preKnob = addKnob ("predelay", "PRE-DELAY"); decayKnob = addKnob ("decay", "DECAY"); addKnob ("size", "SIZE");
-    addKnob ("diffusion", "DIFFUSION"); addKnob ("damping", "DAMPING"); addKnob ("mod", "MOD");
-    addKnob ("width", "WIDTH"); addKnob ("tone", "TONE"); characterKnob = addKnob ("character", "CHARACTER");
-    addKnob ("duckAmt", "AMOUNT"); addKnob ("duckThr", "THRESH"); addKnob ("duckRel", "RELEASE");
-    addKnob ("mix", "MIX"); addKnob ("output", "OUTPUT");
+    // ---- spectrum
+    place (eq, 40, 150, 1880, 196);
+    eq.onActiveBand = [this] (int b) { activeBand = b; repaint(); };
 
-    addToggle (syncBtn, "TEMPO SYNC", "sync");
-    addToggle (freezeBtn, "FREEZE", "freeze");
-    addToggle (bypassBtn, "BYPASS", "bypass");
-    addToggle (duckBtn, "DUCK ON", "duckOn");
-    addToggle (hpBtn, "HIGH PASS", "hpOn");
-    addToggle (lpBtn, "LOW PASS", "lpOn");
-    addToggle (srcBtn, "INPUT", {});
-    addToggle (eqPosBtn, "EQ POST", {});
-    srcBtn.onClick = [this] { setP ("duckSrc", proc.get ("duckSrc") > 0.5f ? 0.f : 1.f); };
-    eqPosBtn.onClick = [this] { setP ("eqPost", proc.get ("eqPost") > 0.5f ? 0.f : 1.f); };
+    // ---- filters
+    addKnob ("hpF", "HIGH PASS", ScFreq, CapGray, 78, [] (double v) { return fmtF (v); }, 40, 392);
+    addKnob ("lpF", "LOW PASS", ScFreq, CapGray, 78, [] (double v) { return fmtF (v); }, 1842, 392);
+    place (hpChips, 128, 424, 130, 30); place (lpChips, 1696, 424, 130, 30);
+    hpChips.onSelect = [this] (int i) { setP ("hpS", (float) i); };
+    lpChips.onSelect = [this] (int i) { setP ("lpS", (float) i); };
 
-    for (int i = 0; i < 9; ++i)
-    {
-        preBtn[(size_t) i].setButtonText (bh::kNoteNames[i]);  preBtn[(size_t) i].onClick  = [this, i] { setP ("preNote", (float) i); };
-        timeBtn[(size_t) i].setButtonText (bh::kNoteNames[i]); timeBtn[(size_t) i].onClick = [this, i] { setP ("timeNote", (float) i); };
-        addAndMakeVisible (preBtn[(size_t) i]); addAndMakeVisible (timeBtn[(size_t) i]);
-    }
-    static const char* bn[5] = { "LF", "LMF", "MF", "HMF", "HF" };
+    static const char* bandName[5] = { "LF", "LMF", "MF", "HMF", "HF" };
+    static const Cap bandCap[5] = { CapBlue, CapGreen, CapYellow, CapOrange, CapRed };
     for (int i = 0; i < 5; ++i)
     {
-        bandBtn[(size_t) i].setButtonText (bn[i]);
-        bandBtn[(size_t) i].onClick = [this, i] { const String id = "b" + String (i); setP (id, proc.get (id) > 0.5f ? 0.f : 1.f); };
-        addAndMakeVisible (bandBtn[(size_t) i]);
+        const float x0 = 285.f + (float) i * 282.f; const String n (i);
+        bandByp[(size_t) i] = addToggle ("BYP", "b" + n, x0 + 128.f, 364, 88, 30, true, 13.f);
+        gainK[(size_t) i] = addKnob ("g" + n, "GAIN", ScDb, bandCap[i], 78, [] (double v) { return fmtG (v); }, x0, 398);
+        freqK[(size_t) i] = addKnob ("f" + n, "FREQ", ScFreq, bandCap[i], 78, [] (double v) { return fmtF (v); }, x0 + 92.f, 398);
+        qK[(size_t) i] = addKnob ("q" + n, "Q", ScQ, bandCap[i], 78, [] (double v) { return "Q" + String (v, 1); }, x0 + 184.f, 398);
+        (void) bandName;
     }
-    addAndMakeVisible (grMeter); addAndMakeVisible (outMeter); addAndMakeVisible (eq);
+
+    // ---- tempo panel
+    for (int i = 0; i < bh::kNumTimeNotes; ++i)          // reverb time: 12 keys (1/32 ... 4 BAR)
+    {
+        const float cx = 49.f + (float) (i % 3) * 77.7f, ry = (float) (i / 3) * 45.f;
+        keyStore[(size_t) i] = std::make_unique<NoteKey> (bh::kTimeNames[i]); timeKeys[(size_t) i] = keyStore[(size_t) i].get();
+        place (*timeKeys[(size_t) i], cx, 630.f + ry, 72.7f, 38);
+        timeKeys[(size_t) i]->onClick = [this, i] { setP ("timeNote", (float) i); };
+    }
+    for (int i = 0; i < 9; ++i)                           // pre-delay: 9 keys
+    {
+        const float cx = 49.f + (float) (i % 3) * 77.7f, ry = (float) (i / 3) * 45.f;
+        keyStore[(size_t) (12 + i)] = std::make_unique<NoteKey> (bh::kNoteNames[i]); pdKeys[(size_t) i] = keyStore[(size_t) (12 + i)].get();
+        place (*pdKeys[(size_t) i], cx, 903.f + ry, 72.7f, 38);
+        pdKeys[(size_t) i]->onClick = [this, i] { setP ("preNote", (float) i); };
+    }
+    place (timeLcd, 49, 813, 228, 36); place (pdLcd, 49, 1041, 228, 36);
+
+    // ---- character
+    {
+        const char* ids[6] = { "size", "diffusion", "damping", "width", "mod", "tone" };
+        const char* lb[6] = { "SIZE", "DIFFUSION", "DAMPING", "WIDTH", "MOD", "TONE" };
+        for (int i = 0; i < 6; ++i)
+        {
+            auto* k = addKnob (ids[i], lb[i], ScPct, CapGray, 108, [] (double v) { return fmtPct (v); }, 316.f + (float) (i % 3) * 124.f, 606.f + (float) (i / 3) * 150.f);
+            if (i == 4) modK = k;
+        }
+    }
+
+    // ---- centre panel
+    place (prePost, 775, 650, 140, 30);
+    prePost.onSelect = [this] (int i) { setP ("eqPost", i == 1 ? 1.f : 0.f); };
+    addToggle ("MOD", "modOn", 722, 766, 120, 36); addToggle ("FREEZE", "freeze", 848, 766, 120, 36); addToggle ("DUCK", "duckOn", 785, 812, 120, 36);
+
+    // ---- ducking
+    place (grMeter, 1060, 626, 340, 176);
+    duckAmtK = addKnob ("duckAmt", "AMOUNT", ScPct, CapGray, 96, [] (double v) { return fmtPct (v); }, 1064, 808);
+    duckSensK = addKnob ("duckSens", "SENS", ScPct, CapGray, 96, [] (double v) { return fmtPct (v); }, 1182, 808);
+    duckRelK = addKnob ("duckRel", "RELEASE", ScMs, CapGray, 96, [] (double v) { return String (roundToInt (v)) + "ms"; }, 1300, 808);
+
+    // ---- output
+    place (outMeter, 1526, 626, 340, 176);
+    addKnob ("mix", "MIX", ScPct, CapGray, 124, [] (double v) { return fmtPct (v); }, 1564, 808);
+    addKnob ("output", "OUTPUT", ScDb, CapGray, 124, [] (double v) { return fmtG (v); }, 1704, 808);
+    addKnob ("trim", "INPUT", ScDb, CapGray, 84, [] (double v) { return fmtG (v); }, 1654, 972);
+
+    // ---- LCD behaviour
+    tempoLcd.getEditText = [this] { return String (roundToInt (proc.bpmEff.load())); };
+    tempoLcd.onEdited = [this] (const String& t) { if (! proc.hostHasBpm.load()) setP ("bpm", jlimit (40.f, 240.f, t.getFloatValue())); };
+    tempoLcd.onDragBegin = [this] { dragStartVal = proc.get ("bpm"); if (auto* pr = proc.apvts.getParameter ("bpm")) pr->beginChangeGesture(); };
+    tempoLcd.onDragDelta = [this] (float d) { setP ("bpm", jlimit (40.f, 240.f, std::round (dragStartVal + d * 0.25f))); };
+    tempoLcd.onDragEnd = [this] { if (auto* pr = proc.apvts.getParameter ("bpm")) pr->endChangeGesture(); };
+
+    timeLcd.getEditText = [this] { return String (roundToInt (proc.get ("timeMs"))); };
+    timeLcd.onEdited = [this] (const String& t) { setP ("timeMs", jlimit (100.f, 16000.f, t.getFloatValue())); };
+    timeLcd.onDragBegin = [this] { dragStartVal = proc.get ("timeMs"); if (auto* pr = proc.apvts.getParameter ("timeMs")) pr->beginChangeGesture(); };
+    timeLcd.onDragDelta = [this] (float d) { setP ("timeMs", jlimit (100.f, 16000.f, dragStartVal + d * 16.f)); };
+    timeLcd.onDragEnd = [this] { if (auto* pr = proc.apvts.getParameter ("timeMs")) pr->endChangeGesture(); };
+    pdLcd.getEditText = [this] { return String (roundToInt (proc.get ("preMs"))); };
+    pdLcd.onEdited = [this] (const String& t) { setP ("preMs", jlimit (0.f, 250.f, t.getFloatValue())); };
+    pdLcd.onDragBegin = [this] { dragStartVal = proc.get ("preMs"); if (auto* pr = proc.apvts.getParameter ("preMs")) pr->beginChangeGesture(); };
+    pdLcd.onDragDelta = [this] (float d) { setP ("preMs", jlimit (0.f, 250.f, dragStartVal + d)); };
+    pdLcd.onDragEnd = [this] { if (auto* pr = proc.apvts.getParameter ("preMs")) pr->endChangeGesture(); };
 
     setResizable (true, true);
-    setResizeLimits (600, 360, 2400, 1440);
-    if (auto* c = getConstrainer()) c->setFixedAspectRatio (5.0 / 3.0);
-    setSize (1200, 720);
-    startTimerHz (30);
+    setResizeLimits (700, 418, 2800, 1672);
+    if (auto* c = getConstrainer()) c->setFixedAspectRatio ((double) DW / (double) DH);
+    setSize (1400, (int) (1400.f * DH / DW));
+    startTimerHz (60);
 }
 
-TempoReverbEditor::~TempoReverbEditor() { stopTimer(); setLookAndFeel (nullptr); }
+TempoReverbEditor::~TempoReverbEditor() { stopTimer(); }
 
-TempoReverbEditor::Knob* TempoReverbEditor::addKnob (const String& id, const String& name)
+void TempoReverbEditor::place (Component& c, float x, float y, float w, float h)
 {
-    auto k = std::make_unique<Knob>();
-    k->name = name;
-    k->s.setSliderStyle (Slider::RotaryVerticalDrag);
-    k->s.setRotaryParameters (MathConstants<float>::pi * 1.25f, MathConstants<float>::pi * 2.75f, true);
-    k->s.setTextBoxStyle (Slider::TextBoxBelow, false, 80, 18);
-    k->s.setMouseDragSensitivity (200);
-    if (auto* par = proc.apvts.getParameter (id))
-        k->s.setDoubleClickReturnValue (true, (double) par->convertFrom0to1 (par->getDefaultValue()));
-    k->att = std::make_unique<AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, id, k->s);
-    addAndMakeVisible (k->s);
+    addAndMakeVisible (c); placed.push_back ({ &c, { x, y, w, h } });
+}
+
+KnobComp* TempoReverbEditor::addKnob (const String& id, const String& label, ScaleKind kind, Cap cap, float size, std::function<String (double)> fmt, float x, float y)
+{
+    auto k = std::make_unique<KnobComp> (label, kind, cap, size, std::move (fmt));
+    sAtt.push_back (std::make_unique<SA> (proc.apvts, id, *k));
+    if (auto* par = proc.apvts.getParameter (id)) k->setDoubleClickReturnValue (true, (double) par->convertFrom0to1 (par->getDefaultValue()));
+    place (*k, x, y, size, KnobComp::cellH (size));
     knobs.push_back (std::move (k));
     return knobs.back().get();
 }
 
-void TempoReverbEditor::addToggle (TextButton& b, const String& text, const String& paramId)
+BellButton* TempoReverbEditor::addToggle (const String& text, const String& paramId, float x, float y, float w, float h, bool jewel, float fpx)
 {
-    b.setButtonText (text);
-    addAndMakeVisible (b);
-    if (paramId.isNotEmpty()) btnAtts.push_back (std::make_unique<BtnAtt> (proc.apvts, paramId, b));
+    auto b = std::make_unique<BellButton> (text, jewel, fpx);
+    b->setClickingTogglesState (true);
+    if (paramId.isNotEmpty()) bAtt.push_back (std::make_unique<BA> (proc.apvts, paramId, *b));
+    place (*b, x, y, w, h);
+    bells.push_back (std::move (b));
+    return bells.back().get();
 }
 
 void TempoReverbEditor::setP (const String& id, float plain)
@@ -396,156 +173,278 @@ void TempoReverbEditor::setP (const String& id, float plain)
     if (auto* p = proc.apvts.getParameter (id)) p->setValueNotifyingHost (p->convertTo0to1 (plain));
 }
 
-void TempoReverbEditor::selectType (int i)
+void TempoReverbEditor::selectProgram (int t)
 {
-    setP ("type", (float) i);
-    const auto& d = bh::kDefaults[i];
-    setP ("predelay", d.predelay); setP ("decay", d.decay); setP ("size", d.size); setP ("diffusion", d.diffusion);
-    setP ("damping", d.damping); setP ("mod", d.mod); setP ("width", d.width); setP ("tone", d.tone); setP ("character", d.character);
+    const auto& p = kPresets[jlimit (0, 7, t)];
+    setP ("type", (float) t);
+    setP ("size", p.size); setP ("diffusion", p.diff); setP ("damping", p.damp); setP ("width", p.width); setP ("mod", p.mod); setP ("tone", p.tone);
+    setP ("timeNote", (float) p.timeNote); setP ("preNote", (float) p.pdNote); setP ("timeMs", p.timeMs); setP ("preMs", p.pdMs);
+    setP ("hpF", p.hpF); setP ("hpS", (float) p.hpS); setP ("lpF", p.lpF); setP ("lpS", (float) p.lpS);
+    for (int i = 0; i < 5; ++i)
+    {
+        const String n (i);
+        setP ("f" + n, p.eq[i][0]); setP ("g" + n, p.eq[i][1]); setP ("q" + n, p.eq[i][2]); setP ("b" + n, 1.f);
+    }
+    activeBand = 0; eq.activeBand = 0;
 }
 
 void TempoReverbEditor::applySkin()
 {
-    const auto& sk = kSkins[jlimit (0, bh::NumTypes - 1, lastType)];
-    laf.skin = &sk; eq.skin = &sk;
-    for (auto& k : knobs)
-    {
-        k->s.setColour (Slider::textBoxTextColourId, sk.accent);
-        k->s.setColour (Slider::textBoxBackgroundColourId, Colour (0xff120b05));
-        k->s.setColour (Slider::textBoxOutlineColourId, Colours::transparentBlack);
-    }
-    static const char* cn[bh::NumTypes] = { "BLOOM", "BRIGHT", "REFLECT", "BLOOM", "TENSION", "SHIMMER", "BLOOM", "CRUSH" };
-    characterKnob->name = cn[lastType];
+    for (auto& k : knobs) k->skinType = lastType;
+    for (auto& b : bells) b->skinType = lastType;
+    for (auto& k : keyStore) if (k) k->skinType = lastType;
+    hpChips.skinType = lpChips.skinType = prePost.skinType = lastType;
+    tempoLcd.skinType = timeLcd.skinType = pdLcd.skinType = lastType;
+    grMeter.skinType = outMeter.skinType = lastType; eq.skinType = lastType;
+    bg = Image();
     repaint();
+}
+
+//==============================================================================
+void TempoReverbEditor::resized()
+{
+    sc = (float) getWidth() / DW;
+    for (auto& p : placed)
+        p.c->setBounds (Rectangle<int> (roundToInt (p.r.getX() * sc), roundToInt (p.r.getY() * sc), roundToInt (p.r.getWidth() * sc), roundToInt (p.r.getHeight() * sc)));
+    bg = Image();
 }
 
 void TempoReverbEditor::timerCallback()
 {
-    const int t = (int) proc.get ("type");
+    const int t = jlimit (0, 7, (int) proc.get ("type"));
     if (t != lastType) { lastType = t; applySkin(); }
-    for (int i = 0; i < bh::NumTypes; ++i) typeBtn[(size_t) i].setToggleState (i == t, dontSendNotification);
-    const int pn = (int) proc.get ("preNote"), tn = (int) proc.get ("timeNote");
-    const bool sync = proc.get ("sync") > 0.5f;
-    for (int i = 0; i < 9; ++i)
-    {
-        preBtn[(size_t) i].setToggleState (sync && i == pn, dontSendNotification);
-        timeBtn[(size_t) i].setToggleState (sync && i == tn, dontSendNotification);
-        preBtn[(size_t) i].setEnabled (sync); timeBtn[(size_t) i].setEnabled (sync);
-    }
-    preKnob->s.setEnabled (! sync); decayKnob->s.setEnabled (! sync);
-    for (int i = 0; i < 5; ++i) bandBtn[(size_t) i].setToggleState (proc.get ("b" + String (i)) < 0.5f, dontSendNotification);
-    srcBtn.setButtonText (proc.get ("duckSrc") > 0.5f ? "SIDECHAIN" : "INPUT");
-    eqPosBtn.setToggleState (proc.get ("eqPost") > 0.5f, dontSendNotification);
-    eqPosBtn.setButtonText (proc.get ("eqPost") > 0.5f ? "EQ: POST" : "EQ: PRE");
+    for (int i = 0; i < 8; ++i) prog[(size_t) i]->setToggleState (i == t, dontSendNotification);
+    abA->setToggleState (proc.abSlot() == 0, dontSendNotification); abB->setToggleState (proc.abSlot() == 1, dontSendNotification);
 
-    grMeter.setValue (-proc.grDb.load());
-    outMeter.setValue (jlimit (-20.f, 3.f, proc.outRmsDb.load() + 18.f));
+    const bool sync = proc.get ("sync") > 0.5f, host = proc.hostHasBpm.load();
+    const int tn = (int) proc.get ("timeNote"), pn = (int) proc.get ("preNote");
+    for (int i = 0; i < bh::kNumTimeNotes; ++i) { timeKeys[(size_t) i]->setToggleState (i == tn, dontSendNotification); timeKeys[(size_t) i]->setEnabled (sync); }
+    for (int i = 0; i < 9; ++i) { pdKeys[(size_t) i]->setToggleState (i == pn, dontSendNotification); pdKeys[(size_t) i]->setEnabled (sync); }
+    hpChips.setSelected ((int) proc.get ("hpS")); lpChips.setSelected ((int) proc.get ("lpS")); prePost.setSelected (proc.get ("eqPost") > 0.5f ? 1 : 0);
+
+    // readouts
+    const float bpm = proc.bpmEff.load();
+    tempoLcd.set (host ? "HOST" : "TEMPO", String (roundToInt (bpm)), {}); tempoLcd.draggable = ! host; tempoLcd.editable = ! host;
+    if (sync)
+    {
+        timeLcd.set ({}, bh::kTimeNames[tn], fmtMsS (proc.effDecay.load() * 1000.0)); pdLcd.set ({}, bh::kNoteNames[pn], fmtMsS (proc.effPre.load()));
+    }
+    else
+    {
+        timeLcd.set ({}, String (roundToInt (proc.get ("timeMs"))), "ms"); pdLcd.set ({}, String (roundToInt (proc.get ("preMs"))), "ms");
+    }
+    timeLcd.draggable = pdLcd.draggable = ! sync; timeLcd.editable = pdLcd.editable = ! sync;
+
+    // dim states (greyed knobs when their section is off)
+    auto setDim = [] (KnobComp* k, bool d) { if (k->dimmed != d) { k->dimmed = d; k->repaint(); } };
+    setDim (modK, proc.get ("modOn") < 0.5f);
+    const bool duck = proc.get ("duckOn") > 0.5f;
+    setDim (duckAmtK, ! duck); setDim (duckSensK, ! duck); setDim (duckRelK, ! duck);
+    for (int i = 0; i < 5; ++i) { const bool byp = proc.get ("b" + String (i)) > 0.5f; setDim (gainK[(size_t) i], byp); setDim (freqK[(size_t) i], byp); setDim (qK[(size_t) i], byp); }
+
+    // meters
+    grMeter.setLevel (proc.grDb.load());
+    outMeter.setLevel (proc.outRmsDb.load() + 18.f);
     grMeter.tick(); outMeter.tick(); eq.tick();
-    repaint (lcdHead); repaint (lcdBpm); repaint (lcdPre); repaint (lcdTime);
+    auto rr = [this] (float x, float y, float w, float h) { return Rectangle<int> (roundToInt (x * sc), roundToInt (y * sc), roundToInt (w * sc) + 1, roundToInt (h * sc) + 1); };
+    repaint (rr (1240.f, 588.f, 680.f, 34.f));      // VU value tags
+    repaint (rr (700.f, 690.f, 290.f, 60.f));        // band read-out
+    repaint (rr (1060.f, 1048.f, 380.f, 20.f));      // duck activity bar
+    repaint (rr (36.f, 1110.f, 1888.f, 58.f));       // footer LEDs + display
 }
 
-void TempoReverbEditor::resized()
+//==============================================================================  static artwork
+void TempoReverbEditor::drawStatic (Graphics& g)
 {
-    scale = (float) getWidth() / 1200.f;
-    auto R = [this] (float x, float y, float w, float h) { return Rectangle<int> (roundToInt (x * scale), roundToInt (y * scale), roundToInt (w * scale), roundToInt (h * scale)); };
+    const auto& sk = skinFor (jmax (0, lastType));
+    const float W = DW, H = DH;
+    ColourGradient grad (sk.p1, 0.f, 0.f, sk.p3, 0.f, H, false); grad.addColour (0.55, sk.p2);
+    g.setGradientFill (grad); g.fillRect (0.f, 0.f, W, H);
 
-    rHeader = R (20, 12, 1160, 46);
-    lcdHead = R (600, 18, 376, 34); freezeBtn.setBounds (R (986, 18, 94, 34)); bypassBtn.setBounds (R (1086, 18, 94, 34));
-    for (int i = 0; i < bh::NumTypes; ++i) typeBtn[(size_t) i].setBounds (R (20.f + (float) i * 146.f, 64, 138, 30));
-    eq.setBounds (R (20, 102, 1160, 190));
+    Random rnd (11);                                                 // brushed grain
+    for (float y = 0.f; y < H; y += 1.f)
+        for (int s = 0; s < 4; ++s)
+        {
+            const float x0 = rnd.nextFloat() * W, len = 120.f + rnd.nextFloat() * 700.f;
+            g.setColour ((rnd.nextBool() ? Colours::white : Colours::black).withAlpha (rnd.nextFloat() * 0.07f));
+            g.fillRect (x0, y, len, 1.f);
+        }
+    ColourGradient sh (Colours::transparentWhite, W * 0.12f, 0.f, Colours::transparentWhite, W * 0.62f, 0.f, false);
+    sh.addColour (0.5, Colours::white.withAlpha (sk.sheen * 0.8f)); g.setGradientFill (sh); g.fillRect (0.f, 0.f, W, H);
+    ColourGradient vs (Colours::white.withAlpha (0.09f), 0.f, 0.f, Colours::black.withAlpha (0.28f), 0.f, H, false);
+    vs.addColour (0.09, Colours::transparentBlack); vs.addColour (0.88, Colours::transparentBlack); g.setGradientFill (vs); g.fillRect (0.f, 0.f, W, H);
+    g.setColour (Colours::white.withAlpha (0.34f)); g.drawHorizontalLine (1, 0.f, W);
+    g.setColour (Colours::black.withAlpha (0.9f)); g.drawRect (0.f, 0.f, W, H, 1.5f);
 
-    hpBtn.setBounds (R (20, 296, 90, 26)); lpBtn.setBounds (R (1000, 296, 80, 26)); eqPosBtn.setBounds (R (1090, 296, 90, 26));
-    for (int i = 0; i < 5; ++i) bandBtn[(size_t) i].setBounds (R (405.f + (float) i * 80.f, 296, 70, 26));
-
-    pTempo = R (20, 330, 262, 374); pReverb = R (292, 330, 450, 374); pDuck = R (752, 330, 230, 374); pOut = R (992, 330, 188, 374);
-
-    lcdBpm = R (30, 356, 140, 34); syncBtn.setBounds (R (180, 356, 92, 34));
-    rLabelTime = R (30, 398, 240, 16); rLabelPre = R (30, 542, 240, 16);
-    for (int i = 0; i < 9; ++i)
+    // screws
+    auto screw = [&] (float cx, float cy, float rot)
     {
-        const float cx = 30.f + (float) (i % 3) * 82.f, ry = (float) (i / 3) * 30.f;
-        timeBtn[(size_t) i].setBounds (R (cx, 416.f + ry, 76, 26)); preBtn[(size_t) i].setBounds (R (cx, 560.f + ry, 76, 26));
-    }
-    lcdTime = R (30, 508, 240, 24); lcdPre = R (30, 652, 240, 24);
+        const float r = 9.5f;
+        g.setColour (Colours::black.withAlpha (0.55f)); g.fillEllipse (cx - r - 2.f, cy - r, (r + 2.f) * 2.f, (r + 2.f) * 2.f + 3.f);
+        ColourGradient sg (Colour (0xfffbfcfd), cx - r * 0.3f, cy - r * 0.44f, Colour (0xff14161a), cx + r, cy + r, true);
+        sg.addColour (0.22, Colour (0xffaeb3bb)); sg.addColour (0.52, Colour (0xff6e737b)); sg.addColour (0.82, Colour (0xff2c2f35));
+        g.setGradientFill (sg); g.fillEllipse (cx - r, cy - r, r * 2.f, r * 2.f);
+        g.setColour (Colours::white.withAlpha (0.13f)); g.drawEllipse (cx - r - 1.f, cy - r - 1.f, (r + 1.f) * 2.f, (r + 1.f) * 2.f, 1.f);
+        Graphics::ScopedSaveState ss (g); g.addTransform (AffineTransform::rotation (degreesToRadians (rot), cx, cy));
+        g.setColour (Colour (0xff0b0c10)); g.fillRoundedRectangle (cx - 5.5f, cy - 1.3f, 11.f, 2.6f, 1.f); g.fillRoundedRectangle (cx - 1.3f, cy - 5.5f, 2.6f, 11.f, 1.f);
+    };
+    screw (20.5f, 20.5f, 18.f); screw (W - 20.5f, 20.5f, 64.f); screw (20.5f, H - 20.5f, -32.f); screw (W - 20.5f, H - 20.5f, 41.f);
+    screw (20.5f, H * 0.5f, 52.f); screw (W - 20.5f, H * 0.5f, -12.f); screw (W * 0.5f, 20.5f, 33.f);
 
-    for (int i = 0; i < 9; ++i) knobs[(size_t) i]->cell = R (300.f + (float) (i % 3) * 144.f, 356.f + (float) (i / 3) * 116.f, 144, 112);
-    duckBtn.setBounds (R (760, 356, 100, 26)); srcBtn.setBounds (R (868, 356, 106, 26));
-    grMeter.setBounds (R (762, 390, 210, 132));
-    for (int i = 0; i < 3; ++i) knobs[(size_t) (9 + i)]->cell = R (758.f + (float) i * 74.f, 530, 74, 124);
-    outMeter.setBounds (R (1000, 356, 172, 118));
-    knobs[12]->cell = R (1000, 484, 86, 124); knobs[13]->cell = R (1090, 484, 86, 124);
+    auto line = [&] (float y) { g.setColour (Colours::black.withAlpha (0.6f)); g.drawHorizontalLine ((int) y + 1, 36.f, W - 36.f); g.setColour (sk.silk.withAlpha (0.16f)); g.drawHorizontalLine ((int) y, 36.f, W - 36.f); };
+    line (68.f); line (136.f); line (528.f); line (1108.f);
 
-    for (auto& k : knobs)
+    // brand
     {
-        const int labelH = roundToInt (15.f * scale);
-        k->s.setTextBoxStyle (Slider::TextBoxBelow, false, roundToInt ((float) k->cell.getWidth() * 0.82f), roundToInt (18.f * scale));
-        k->s.setBounds (k->cell.withTrimmedTop (labelH));
+        g.setFont (bhFont (28.f, 3)); g.setColour (Colours::black.withAlpha (0.8f)); g.drawText ("Boom", Rectangle<float> (40.f, 15.f, 120.f, 40.f), Justification::centredLeft, false);
+        g.setColour (sk.silk); g.drawText ("Boom", Rectangle<float> (40.f, 14.f, 120.f, 40.f), Justification::centredLeft, false);
+        const float bw = bhFont (28.f, 3).getStringWidthFloat ("Boom");
+        g.setColour (sk.brand); g.drawText ("Hype", Rectangle<float> (40.f + bw, 14.f, 120.f, 40.f), Justification::centredLeft, false);
+        g.setFont (bhFont (14.f, 1, 0.15f)); g.setColour (sk.dim);
+        g.drawText ("TECH  -  TEMPO REVERB  -  MK I", Rectangle<float> (40.f + bw + 124.f, 14.f, 520.f, 40.f), Justification::centredLeft, false);
     }
+
+    // display bezel
+    {
+        Rectangle<float> r (40.f, 150.f, 1880.f, 196.f);
+        g.setColour (Colour (0xff08090b)); g.drawRoundedRectangle (r.expanded (3.f), 6.f, 3.f);
+        g.setColour (Colours::white.withAlpha (0.2f)); g.drawRoundedRectangle (r.expanded (4.5f), 7.f, 1.f);
+        g.setColour (Colours::black); g.drawRoundedRectangle (r.expanded (5.5f), 8.f, 1.f);
+    }
+
+    // eq strip labels
+    g.setFont (bhFont (13.f, 2, 0.12f)); g.setColour (sk.dim);
+    g.drawText ("SLOPE", Rectangle<float> (128.f, 400.f, 100.f, 20.f), Justification::centredLeft, false);
+    g.drawText ("SLOPE", Rectangle<float> (1726.f, 400.f, 100.f, 20.f), Justification::centredRight, false);
+    static const char* bn[5] = { "LF", "LMF", "MF", "HMF", "HF" }; static const Cap bc[5] = { CapBlue, CapGreen, CapYellow, CapOrange, CapRed };
+    for (int i = 0; i < 5; ++i)
+    {
+        const float x0 = 285.f + (float) i * 282.f;
+        const auto c = sk.caps[bc[i]];
+        g.setColour (Colours::black.withAlpha (0.5f)); g.fillEllipse (x0 + 48.f, 372.f, 16.f, 16.f);
+        g.setColour (c); g.fillEllipse (x0 + 48.f, 371.f, 16.f, 16.f);
+        g.setFont (bhFont (18.f, 2, 0.13f)); g.setColour (Colours::black.withAlpha (0.7f)); g.drawText (bn[i], Rectangle<float> (x0 + 71.f, 366.f, 60.f, 26.f), Justification::centredLeft, false);
+        g.setColour (sk.silk); g.drawText (bn[i], Rectangle<float> (x0 + 71.f, 365.f, 60.f, 26.f), Justification::centredLeft, false);
+    }
+
+    // panels
+    struct PanelDef { float x, w; const char* title; };
+    static const PanelDef panels[5] = { { 38.f, 250.f, "Tempo" }, { 302.f, 384.f, "Character" }, { 700.f, 290.f, "" }, { 1004.f, 452.f, "Ducking" }, { 1470.f, 452.f, "Output" } };
+    const float py = 546.f, ph = 554.f;
+    for (auto& p : panels)
+    {
+        Rectangle<float> r (p.x, py, p.w, ph);
+        ColourGradient pg (Colours::white.withAlpha (0.02f), 0.f, py, Colours::black.withAlpha (0.22f), 0.f, py + ph, false);
+        g.setGradientFill (pg); g.fillRoundedRectangle (r, 4.f);
+        g.setColour (Colours::black.withAlpha (0.4f)); g.drawRoundedRectangle (r, 4.f, 1.f);
+        g.setColour (Colours::white.withAlpha (0.06f)); g.drawHorizontalLine ((int) py + 1, p.x + 4.f, p.x + p.w - 4.f);
+        if (String (p.title).isNotEmpty())
+        {
+            g.setFont (bhFont (19.f, 2, 0.12f)); g.setColour (Colours::black.withAlpha (0.7f));
+            g.drawText (String (p.title).toUpperCase(), Rectangle<float> (p.x, py + 11.f, p.w, 28.f), Justification::centred, false);
+            g.setColour (sk.silk); g.drawText (String (p.title).toUpperCase(), Rectangle<float> (p.x, py + 10.f, p.w, 28.f), Justification::centred, false);
+            g.setColour (sk.silk.withAlpha (0.7f)); g.fillRect (p.x + p.w * 0.5f - 15.f, py + 42.f, 30.f, 1.5f);
+        }
+    }
+    // engraved curved dividers
+    for (int i = 0; i < 4; ++i)
+    {
+        const float x = panels[i].x + panels[i].w + 7.f;
+        auto curve = [&] (float dx, Colour c, float w) { Path p; p.startNewSubPath (x + dx, py + 4.f); p.cubicTo (x + dx + 26.f, py + ph * 0.28f, x + dx - 26.f, py + ph * 0.62f, x + dx, py + ph - 4.f); g.setColour (c); g.strokePath (p, PathStrokeType (w)); };
+        curve (1.6f, Colours::black.withAlpha (0.75f), 2.2f); curve (0.f, sk.silk.withAlpha (0.78f), 1.5f);
+    }
+    g.setFont (bhFont (14.f, 2, 0.1f)); g.setColour (sk.silk);
+    g.drawText ("REVERB TIME", Rectangle<float> (38.f, 588.f, 250.f, 22.f), Justification::centred, false);
+    g.drawText ("PRE-DELAY", Rectangle<float> (38.f, 861.f, 250.f, 22.f), Justification::centred, false);
+    g.setFont (bhFont (14.5f, 2, 0.1f));
+    g.drawText ("GAIN REDUCTION", Rectangle<float> (1020.f, 594.f, 250.f, 22.f), Justification::centredLeft, false);
+    g.drawText ("OUTPUT LEVEL", Rectangle<float> (1486.f, 594.f, 250.f, 22.f), Justification::centredLeft, false);
+
+    // centre panel art
+    {
+        const float cx = 700.f + 145.f;
+        g.setFont (bhFont (31.f, 3)); g.setColour (Colours::black.withAlpha (0.7f)); g.drawText ("BoomHype", Rectangle<float> (700.f, 562.f, 290.f, 46.f), Justification::centred, false);
+        g.setColour (sk.silk); g.drawText ("BoomHype", Rectangle<float> (700.f, 560.f, 290.f, 46.f), Justification::centred, false);
+        g.setFont (bhFont (13.f, 2, 0.14f)); g.setColour (sk.dim); g.drawText ("TECH  -  TEMPO REVERB  -  MK I", Rectangle<float> (700.f, 608.f, 290.f, 20.f), Justification::centred, false);
+        for (float y : { 638.f, 746.f, 862.f }) { g.setColour (sk.silk.withAlpha (0.55f)); g.fillRect (cx - 113.f, y, 226.f, 1.5f); }
+        g.setFont (bhFont (13.f, 2, 0.09f)); g.setColour (sk.dim);
+        g.drawText ("DRAG BANDS - SCROLL = Q", Rectangle<float> (700.f, 876.f, 290.f, 20.f), Justification::centred, false);
+        g.drawText ("DOUBLE-CLICK A BAND = RESET GAIN", Rectangle<float> (700.f, 896.f, 290.f, 20.f), Justification::centred, false);
+    }
+    // footer labels
+    g.setFont (bhFont (14.f, 2, 0.09f)); g.setColour (sk.dim);
+    g.drawText ("IN", Rectangle<float> (74.f, 1126.f, 50.f, 22.f), Justification::centredLeft, false);
+    g.drawText ("OUT", Rectangle<float> (166.f, 1126.f, 50.f, 22.f), Justification::centredLeft, false);
+    g.drawText ("SYNC", Rectangle<float> (270.f, 1126.f, 60.f, 22.f), Justification::centredLeft, false);
+    g.drawText ("v1.0.0", Rectangle<float> (1600.f, 1126.f, 120.f, 22.f), Justification::centredRight, false);
+    g.setColour (sk.accent); g.drawText ("BoomHype Tech", Rectangle<float> (1730.f, 1126.f, 190.f, 22.f), Justification::centredRight, false);
+    g.setColour (sk.dim); g.drawText ("ACT", Rectangle<float> (1020.f, 1048.f, 50.f, 20.f), Justification::centredLeft, false);
 }
 
-void TempoReverbEditor::drawPanel (Graphics& g, Rectangle<int> r, const String& title, float sc)
+void TempoReverbEditor::rebuildBackground()
 {
-    const auto& sk = kSkins[jlimit (0, bh::NumTypes - 1, lastType)];
-    g.setColour (Colours::black.withAlpha (0.12f)); g.fillRoundedRectangle (r.toFloat(), 8.f * sc);
-    g.setColour (Colours::black.withAlpha (0.38f)); g.drawRoundedRectangle (r.toFloat().reduced (0.5f), 8.f * sc, 1.5f);
-    g.setColour (inkOf (sk)); g.setFont (bhFont (12.f * sc));
-    g.drawText (title, r.withHeight (roundToInt (22.f * sc)), Justification::centred, false);
+    const float ss = jlimit (1.f, 2.f, 2400.f / (float) jmax (1, getWidth()));
+    const int w = roundToInt ((float) getWidth() * ss), h = roundToInt ((float) getHeight() * ss);
+    if (w < 8 || h < 8) return;
+    bg = Image (Image::ARGB, w, h, true);
+    Graphics ig (bg);
+    ig.addTransform (AffineTransform::scale ((float) w / DW, (float) h / DH));
+    drawStatic (ig);
 }
 
-void TempoReverbEditor::drawLcd (Graphics& g, Rectangle<int> r, const String& text)
-{
-    const auto& sk = kSkins[jlimit (0, bh::NumTypes - 1, lastType)];
-    g.setColour (Colour (0xff120b05)); g.fillRoundedRectangle (r.toFloat(), 4.f * scale);
-    g.setColour (Colours::black); g.drawRoundedRectangle (r.toFloat(), 4.f * scale, 1.f);
-    g.setColour (sk.accent); g.setFont (bhFont ((float) r.getHeight() * 0.58f));
-    g.drawText (text, r, Justification::centred, false);
-}
-
+//==============================================================================  dynamic artwork
 void TempoReverbEditor::paint (Graphics& g)
 {
-    const float sc = scale;
-    const auto& sk = kSkins[jlimit (0, bh::NumTypes - 1, lastType < 0 ? 0 : lastType)];
-    const auto W = (float) getWidth(), H = (float) getHeight();
+    if (lastType < 0) lastType = jlimit (0, 7, (int) proc.get ("type"));
+    if (bg.isNull()) rebuildBackground();
+    if (bg.isValid()) g.drawImage (bg, getLocalBounds().toFloat());
+    const auto& sk = skinFor (lastType);
+    Graphics::ScopedSaveState ss (g);
+    g.addTransform (AffineTransform::scale (sc));
 
-    ColourGradient grad (sk.p1, 0.f, 0.f, sk.p3, 0.f, H, false);
-    grad.addColour (0.5, sk.p2);
-    g.setGradientFill (grad); g.fillAll();
-    Random rnd (7);                                                         // brushed-metal grain
-    for (float y = 0.f; y < H; y += jmax (1.f, 2.f * sc))
+    // VU value tags
+    g.setFont (bhFont (17.f, 1)); g.setColour (sk.accent);
+    g.drawText (String ("-") + String (proc.grDb.load(), 1) + " dB", Rectangle<float> (1250.f, 592.f, 190.f, 26.f), Justification::centredRight, false);
+    const float lv = proc.outRmsDb.load() + 18.f;
+    g.drawText (lv < -19.9f ? String ("-inf dB") : String (lv >= 0.f ? "+" : "") + String (lv, 1) + " dB", Rectangle<float> (1716.f, 592.f, 190.f, 26.f), Justification::centredRight, false);
+
+    // band read-out (centre panel)
     {
-        g.setColour ((rnd.nextBool() ? Colours::white : Colours::black).withAlpha (rnd.nextFloat() * 0.05f));
-        g.fillRect (0.f, y, W, jmax (1.f, sc));
+        static const char* bn[5] = { "LF", "LMF", "MF", "HMF", "HF" }; static const Cap bc[5] = { CapBlue, CapGreen, CapYellow, CapOrange, CapRed };
+        const String n (jlimit (0, 4, activeBand));
+        const bool byp = proc.get ("b" + n) > 0.5f;
+        g.setColour (sk.caps[bc[jlimit (0, 4, activeBand)]]); g.fillEllipse (738.f, 713.f, 12.f, 12.f);
+        g.setFont (bhFont (16.f, 1, 0.04f)); g.setColour (sk.silk);
+        g.drawText (String (bn[jlimit (0, 4, activeBand)]) + "  " + fmtF (proc.get ("f" + n)) + (byp ? "  BYP" : ""), Rectangle<float> (758.f, 698.f, 222.f, 22.f), Justification::centredLeft, false);
+        g.drawText (fmtG (proc.get ("g" + n)) + "  Q" + String (proc.get ("q" + n), 1), Rectangle<float> (758.f, 720.f, 222.f, 22.f), Justification::centredLeft, false);
     }
-    g.setColour (Colours::white.withAlpha (0.3f)); g.drawRect (getLocalBounds(), 1);
-    g.setColour (Colours::black.withAlpha (0.6f)); g.drawRect (getLocalBounds().reduced (1), 1);
-    const float m = 9.f * sc;
-    for (auto p : { Point<float> (m, m), Point<float> (W - m, m), Point<float> (m, H - m), Point<float> (W - m, H - m) })   // rack screws
+    // duck activity
     {
-        const float r = 5.f * sc;
-        g.setGradientFill (ColourGradient (Colour (0xfff0f0f0), p.x - r * 0.4f, p.y - r * 0.4f, Colour (0xff3a3a3a), p.x + r, p.y + r, true));
-        g.fillEllipse (p.x - r, p.y - r, r * 2.f, r * 2.f);
+        Rectangle<float> r (1064.f, 1055.f, 372.f, 6.f);
+        g.setGradientFill (ColourGradient (Colour (0xff08090c), 0.f, r.getY(), Colour (0xff14161b), 0.f, r.getBottom(), false)); g.fillRoundedRectangle (r, 3.f);
+        const float a = proc.get ("duckOn") > 0.5f ? jlimit (0.f, 1.f, proc.grDb.load() / 18.f) : 0.f;
+        if (a > 0.f) { g.setGradientFill (ColourGradient (Colour (0xffe07a20), r.getX(), 0.f, Colour (0xffffc46a), r.getRight(), 0.f, false)); g.fillRoundedRectangle (r.withWidth (r.getWidth() * a), 3.f); }
     }
-
-    // logo
-    AttributedString as;
-    as.append ("Boom", bhFont (30.f * sc), inkOf (sk)); as.append ("Hype", bhFont (30.f * sc), sk.darkInk ? Colour (0xff8a1d00) : sk.accent);
-    as.draw (g, Rectangle<float> (30.f * sc, 14.f * sc, 260.f * sc, 40.f * sc));
-    g.setColour (inkOf (sk).withAlpha (0.85f)); g.setFont (bhFont (11.f * sc));
-    g.drawText ("TECH  -  TEMPO REVERB  MK I", Rectangle<float> (250.f * sc, 24.f * sc, 330.f * sc, 24.f * sc), Justification::centredLeft, false);
-
-    drawLcd (g, lcdHead, String (bh::kTypeNames[jmax (0, lastType)]) + "  |  " + String (proc.effDecay.load(), 2) + " s  |  PRE " + String (proc.effPre.load(), 0) + " ms");
-
-    drawPanel (g, pTempo, "TEMPO HELPER", sc); drawPanel (g, pReverb, "REVERB", sc);
-    drawPanel (g, pDuck, "DUCKING", sc);       drawPanel (g, pOut, "OUTPUT", sc);
-
-    drawLcd (g, lcdBpm, "BPM  " + String (proc.hostBpm.load(), 1));
-    g.setColour (inkOf (sk)); g.setFont (bhFont (10.f * sc));
-    g.drawText ("REVERB TIME", rLabelTime, Justification::centred, false);
-    g.drawText ("PRE-DELAY", rLabelPre, Justification::centred, false);
-    drawLcd (g, lcdTime, "TIME  " + String (proc.effDecay.load(), 2) + " s");
-    drawLcd (g, lcdPre, "PRE  " + String (proc.effPre.load(), 1) + " ms");
-
-    g.setColour (inkOf (sk)); g.setFont (bhFont (11.f * sc));
-    for (auto& k : knobs)
-        g.drawText (k->name, k->cell.withHeight (roundToInt (15.f * sc)), Justification::centred, false);
+    // LEDs + mini display
+    auto led = [&] (float cx, float cy, bool lit)
+    {
+        g.setColour (Colour (0xff8e929a)); g.fillEllipse (cx - 7.f, cy - 7.f, 14.f, 14.f);
+        g.setColour (Colour (0xff111111)); g.fillEllipse (cx - 6.f, cy - 6.f, 12.f, 12.f);
+        if (lit) { g.setColour (Colour (0x2646e07e)); g.fillEllipse (cx - 11.f, cy - 11.f, 22.f, 22.f); }
+        g.setColour (lit ? Colour (0xff46e07e) : Colour (0xff2a2d33)); g.fillEllipse (cx - 5.f, cy - 5.f, 10.f, 10.f);
+    };
+    const bool byp = proc.get ("bypass") > 0.5f;
+    led (60.f, 1137.f, ! byp && proc.inPeakDb.load() > -50.f); led (152.f, 1137.f, ! byp && proc.get ("mix") > 0.02f); led (256.f, 1137.f, proc.get ("sync") > 0.5f);
+    {
+        Rectangle<float> r (780.f, 1120.f, 400.f, 34.f);
+        g.setGradientFill (ColourGradient (Colour (0xff08090c), 0.f, r.getY(), Colour (0xff040507), 0.f, r.getBottom(), false)); g.fillRoundedRectangle (r, 3.f);
+        g.setColour (Colours::black); g.drawRoundedRectangle (r, 3.f, 1.f);
+        const int t = jlimit (0, 7, lastType); const bool sync = proc.get ("sync") > 0.5f;
+        String txt = String (bh::kTypeNames[t]);
+        if (byp) txt = "BYPASSED";
+        else if (proc.get ("freeze") > 0.5f) txt += "  |  FREEZE";
+        else txt += "  |  " + (sync ? String (bh::kTimeNames[(int) proc.get ("timeNote")]) : fmtMsS (proc.get ("timeMs"))) + "  |  " + String (roundToInt (proc.bpmEff.load())) + " BPM";
+        g.setFont (bhFont (17.f, 1, 0.08f)); g.setColour (sk.accent.withAlpha (0.25f)); g.drawText (txt, r.translated (0.f, 1.f), Justification::centred, false);
+        g.setColour (sk.accent); g.drawText (txt, r, Justification::centred, false);
+    }
 }

@@ -1,15 +1,15 @@
 // BoomHype Tech - Tempo Reverb MK I
-// Reverb DSP engine. Pure C++17 (no JUCE), so it can be unit-tested on its own.
+// Reverb DSP engine. Pure C++17 (no JUCE) so it can be unit-tested on its own.
 //
-//  HALL      8-line feedback delay network (FDN), sparse early reflections, pre-bloom tail
-//  PLATE     Dattorro plate topology (Dattorro, JAES 1997): instant dense build-up,
-//            no early reflections, bright, modulated all-pass tank
-//  ROOM      small FDN, dense/strong early reflections, short decay, light modulation
-//  SPACE     very large FDN, deep modulation, wide, long diffuse bloom
-//  SPRING    dispersive all-pass chain in a feedback loop (the "boing / drip" chirp)
-//  SHIMMER   FDN with an octave-up pitch shifter inside the feedback path
-//  CATHEDRAL huge sparse early reflections, long pre-tail, dark and slow
-//  LO-FI     small FDN + sample-rate/bit reduction + tape-style wobble
+//  HALL      concert hall: image-source early reflections of a 34 x 22 x 15 m shoebox,
+//            8-line FDN tail, bass-rich decay, gentle modulation
+//  PLATE     Dattorro plate (JAES 1997): instant dense build-up, no early reflections, bright
+//  ROOM      4.6 x 3.7 x 2.7 m live room: strong, close early reflections, short tight tail
+//  SPACE     huge ambient hall, wide + deeply modulated slow bloom
+//  SPRING    dispersive all-pass chains in feedback loops (the "boing / drip" chirp)
+//  SHIMMER   FDN with an octave-up pitch shifter in the feedback path
+//  CATHEDRAL 62 x 30 x 32 m stone nave: sparse late early-reflections, very long dark tail
+//  LO-FI     small room + sample-rate / bit reduction + tape wow & flutter
 #pragma once
 #include <vector>
 #include <cmath>
@@ -32,18 +32,16 @@ inline constexpr const char* kTypeNames[NumTypes] = { "HALL", "PLATE", "ROOM", "
 inline constexpr const char* kNoteNames[9] = { "1/32", "1/16T", "1/16", "1/8T", "1/8", "1/4T", "1/4", "1/2", "1/1" };
 inline constexpr float kNoteFrac[9] = { 0.03125f, 0.0416667f, 0.0625f, 0.0833333f, 0.125f, 0.1666667f, 0.25f, 0.5f, 1.0f };
 
-struct TypeDefaults { float predelay, decay, size, diffusion, damping, mod, width, tone, character; };
-inline constexpr TypeDefaults kDefaults[NumTypes] = {
-    //  pre    decay  size  diff  damp  mod   width tone  char
-    {  25.f,  2.6f, .75f, .75f, .45f, .35f, 1.0f, .50f, .50f },   // Hall
-    {   0.f,  1.8f, .50f, .90f, .35f, .25f, 1.0f, .55f, .60f },   // Plate
-    {   5.f,  0.55f,.35f, .60f, .55f, .10f, 0.8f, .50f, .50f },   // Room
-    {  40.f,  7.0f, .90f, .85f, .30f, .60f, 1.2f, .50f, .60f },   // Space
-    {   0.f,  2.2f, .50f, .50f, .50f, .30f, 0.8f, .50f, .50f },   // Spring
-    {  30.f,  5.5f, .85f, .85f, .25f, .60f, 1.1f, .60f, .50f },   // Shimmer
-    {  55.f,  8.5f, .95f, .80f, .40f, .40f, 1.1f, .40f, .50f },   // Cathedral
-    {  10.f,  1.6f, .50f, .60f, .60f, .60f, 0.8f, .40f, .60f }    // Lo-Fi
-};
+// Reverb TIME can go longer than pre-delay: same notes, then 2, 3 and 4 bars
+inline constexpr int kNumTimeNotes = 12;
+inline constexpr const char* kTimeNames[12] = { "1/32", "1/16T", "1/16", "1/8T", "1/8", "1/4T", "1/4", "1/2", "1/1", "2 BAR", "3 BAR", "4 BAR" };
+inline constexpr float kTimeFrac[12] = { 0.03125f, 0.0416667f, 0.0625f, 0.0833333f, 0.125f, 0.1666667f, 0.25f, 0.5f, 1.0f, 2.0f, 3.0f, 4.0f };
+
+// Tempo-synced reverb time is the note length times this factor, so big spaces get big times at normal tempos
+inline constexpr float kTimeMul[NumTypes] = { 1.0f, 1.0f, 1.0f, 2.0f, 1.0f, 1.5f, 3.0f, 1.0f };
+
+// Defaults used for the "character" amount (not shown on the face) per type
+inline constexpr float kCharacter[NumTypes] = { .50f, .60f, .55f, .60f, .50f, .50f, .50f, .60f };
 
 // ------------------------------------------------------------------ biquad / EQ helpers
 struct BiquadCoeffs { double b0 = 1, b1 = 0, b2 = 0, a1 = 0, a2 = 0; };
@@ -71,6 +69,19 @@ inline BiquadCoeffs makeLP (double fs, double f, double q = 0.7071)
     const double w = 2.0 * 3.14159265358979 * f / fs, s = std::sin (w), c = std::cos (w), al = s / (2.0 * q);
     return normalise ((1 - c) / 2, 1 - c, (1 - c) / 2, 1 + al, -2 * c, 1 - al);
 }
+// first-order (6 dB/oct) filters expressed as biquads (bilinear transform)
+inline BiquadCoeffs makeHP1 (double fs, double f)
+{
+    f = std::min (f, fs * 0.45);
+    const double k = std::tan (3.14159265358979 * f / fs), n = 1.0 / (1.0 + k);
+    BiquadCoeffs c; c.b0 = n; c.b1 = -n; c.b2 = 0; c.a1 = (k - 1.0) * n; c.a2 = 0; return c;
+}
+inline BiquadCoeffs makeLP1 (double fs, double f)
+{
+    f = std::min (f, fs * 0.45);
+    const double k = std::tan (3.14159265358979 * f / fs), n = 1.0 / (1.0 + k);
+    BiquadCoeffs c; c.b0 = k * n; c.b1 = k * n; c.b2 = 0; c.a1 = (k - 1.0) * n; c.a2 = 0; return c;
+}
 inline double magnitudeDb (const BiquadCoeffs& k, double fs, double f)
 {
     const double w = 2.0 * 3.14159265358979 * f / fs;
@@ -90,6 +101,23 @@ struct Biquad
         return (float) y;
     }
     void reset() { z1[0] = z1[1] = z2[0] = z2[1] = 0; }
+};
+
+// High-pass / low-pass with selectable slope: 0 = off, 1 = 6 dB/oct, 2 = 12 dB/oct, 3 = 24 dB/oct
+struct CutFilter
+{
+    int slope = 0, n = 0; bool hp = true; BiquadCoeffs c[2]; Biquad b[2];
+    void set (double fs, double f, int s, bool isHP)
+    {
+        slope = s; hp = isHP; n = (s == 0) ? 0 : (s == 3 ? 2 : 1);
+        if (s == 1) c[0] = isHP ? makeHP1 (fs, f) : makeLP1 (fs, f);
+        else if (s == 2) c[0] = isHP ? makeHP (fs, f, 0.70710678) : makeLP (fs, f, 0.70710678);
+        else if (s == 3) { c[0] = isHP ? makeHP (fs, f, 0.5411961) : makeLP (fs, f, 0.5411961); c[1] = isHP ? makeHP (fs, f, 1.3065630) : makeLP (fs, f, 1.3065630); }
+        for (int i = 0; i < n; ++i) b[i].c = c[i];
+    }
+    inline float process (int ch, float x) { for (int i = 0; i < n; ++i) x = b[i].process (ch, x); return x; }
+    double magDb (double fs, double f) const { double d = 0; for (int i = 0; i < n; ++i) d += magnitudeDb (c[i], fs, f); return d; }
+    void reset() { b[0].reset(); b[1].reset(); }
 };
 
 // ------------------------------------------------------------------ building blocks
@@ -154,7 +182,7 @@ struct PitchShifter   // two cross-faded delay taps; ratio 2 = one octave up
     }
 };
 
-// ------------------------------------------------------------------ 8-line FDN
+// ------------------------------------------------------------------ 8-line FDN with 2-band decay
 class FDN
 {
 public:
@@ -162,7 +190,7 @@ public:
     void prepare (float sampleRate)
     {
         sr = sampleRate;
-        for (int i = 0; i < N; ++i) { line[i].init ((int) (0.6f * sr) + 64); damp[i].reset(); ph[i] = 0.9f * (float) i; }
+        for (int i = 0; i < N; ++i) { line[i].init ((int) (0.55f * sr) + 64); damp[i].reset(); split[i].reset(); ph[i] = 0.9f * (float) i; }
         static constexpr float apMs[2][4] = { { 4.7f, 7.9f, 11.3f, 16.9f }, { 5.3f, 8.7f, 12.7f, 17.3f } };
         for (int c = 0; c < 2; ++c)
             for (int k = 0; k < 4; ++k)
@@ -170,25 +198,26 @@ public:
                 const int l = (int) (apMs[c][k] * 0.001f * sr);
                 ap[c][k].init (l + 2); ap[c][k].set (l, 0.7f);
             }
-        curMul = tgtMul = 1.f; curRt = tgtRt = 1.f; updateGains();
+        curMul = tgtMul = 1.f; curRt = tgtRt = 1.f; curLow = tgtLow = 1.f; updateGains();
     }
     void clear()
     {
-        for (int i = 0; i < N; ++i) { line[i].clear(); damp[i].reset(); }
+        for (int i = 0; i < N; ++i) { line[i].clear(); damp[i].reset(); split[i].reset(); }
         for (int c = 0; c < 2; ++c) for (int k = 0; k < 4; ++k) ap[c][k].clear();
     }
-    void setTargets (float sizeMul, float rt60, float dampHz, float modDepthSamples, float diffG, bool freezeOn)
+    // rt60: seconds at mid frequencies.  lowMul: RT of the bass band relative to mid (1.3 = 30 % longer)
+    void setTargets (float sizeMul, float rt60, float lowMul, float dampHz, float modDepthSamples, float diffG, bool freezeOn)
     {
-        tgtMul = sizeMul; tgtRt = std::max (0.05f, rt60 * 1.25f); modDepth = modDepthSamples; freeze = freezeOn;
-        for (int i = 0; i < N; ++i) damp[i].setCutoff (freeze ? 0.45f * sr : dampHz, sr);
+        tgtMul = sizeMul; tgtRt = std::max (0.05f, rt60); tgtLow = lowMul; modDepth = modDepthSamples; freeze = freezeOn;
+        for (int i = 0; i < N; ++i) { damp[i].setCutoff (freeze ? 0.45f * sr : dampHz, sr); split[i].setCutoff (320.f, sr); }
         for (int c = 0; c < 2; ++c) for (int k = 0; k < 4; ++k) ap[c][k].g = diffG;
     }
-    float inputNorm() const { return norm; }
 
     inline void process (float inL, float inR, float extraIn, float& oL, float& oR)
     {
         curMul += (tgtMul - curMul) * 0.0006f;
         curRt += (tgtRt - curRt) * 0.0006f;
+        curLow += (tgtLow - curLow) * 0.0006f;
         if ((++cnt & 15) == 0) updateGains();
 
         float d[2] = { inL, inR };
@@ -199,10 +228,12 @@ public:
         {
             ph[i] += rate[i] / sr * 2.f * kPi; if (ph[i] > 2.f * kPi) ph[i] -= 2.f * kPi;
             const float dl = std::max (2.f, baseMs[i] * 0.001f * sr * curMul + modDepth * std::sin (ph[i]));
-            y[i] = damp[i].lp (line[i].read (dl)) * g[i];
+            const float hf = damp[i].lp (line[i].read (dl));          // air / wall absorption
+            const float lo = split[i].lp (hf);                         // bass band
+            y[i] = lo * gLow[i] + (hf - lo) * g[i];
             sum += y[i];
         }
-        const float h = sum * (2.f / (float) N);
+        const float h = sum * (2.f / (float) N);                       // Householder feedback matrix
         oL = oR = 0.f;
         for (int i = 0; i < N; ++i)
         {
@@ -220,17 +251,18 @@ private:
         for (int i = 0; i < N; ++i)
         {
             const float lenSec = baseMs[i] * 0.001f * curMul;
-            g[i] = freeze ? 0.99995f : std::min (0.9995f, std::pow (10.f, -3.f * lenSec / curRt));
+            g[i]    = freeze ? 0.99995f : std::min (0.9996f, std::pow (10.f, -3.f * lenSec / curRt));
+            gLow[i] = freeze ? 0.99995f : std::min (0.9996f, std::pow (10.f, -3.f * lenSec / (curRt * curLow)));
             gs += g[i];
         }
         const float ga = gs / (float) N;
         norm = 0.55f * std::pow (std::sqrt (std::max (0.02f, 1.f - ga * ga)), 0.6f);
     }
 
-    float sr = 48000.f, curMul = 1.f, tgtMul = 1.f, curRt = 1.f, tgtRt = 1.f, modDepth = 0.f, norm = 0.3f;
+    float sr = 48000.f, curMul = 1.f, tgtMul = 1.f, curRt = 1.f, tgtRt = 1.f, curLow = 1.f, tgtLow = 1.f, modDepth = 0.f, norm = 0.3f;
     bool freeze = false; unsigned cnt = 0;
-    Delay line[N]; OnePole damp[N]; Allpass ap[2][4];
-    float ph[N] {}, g[N] {};
+    Delay line[N]; OnePole damp[N], split[N]; Allpass ap[2][4];
+    float ph[N] {}, g[N] {}, gLow[N] {};
     static constexpr float baseMs[N] = { 29.7f, 37.1f, 41.1f, 43.7f, 53.3f, 59.9f, 67.7f, 73.3f };
     static constexpr float rate[N]   = { 0.21f, 0.33f, 0.47f, 0.59f, 0.71f, 0.83f, 1.07f, 1.31f };
     static constexpr float sgn[N]    = { 1.f, -1.f, 1.f, 1.f, -1.f, 1.f, -1.f, -1.f };
@@ -263,12 +295,12 @@ public:
     {
         mul = clampf (sizeMul, 0.4f, 1.75f); freeze = freezeOn;
         const float loopSec = 0.7254f * mul;
-        decayG = freeze ? 0.99998f : std::min (0.9995f, std::pow (10.f, -1.5f * loopSec / std::max (0.05f, rt60 * 1.22f)));
+        decayG = freeze ? 0.99998f : std::min (0.9995f, std::pow (10.f, -1.5f * loopSec / std::max (0.05f, rt60 * 1.32f)));
         lDamp.setCutoff (freeze ? 0.45f * sr : dampHz, sr); rDamp.setCutoff (freeze ? 0.45f * sr : dampHz, sr);
         bw.setCutoff (3000.f * std::pow (6.f, brightness), sr);
         excursion = modAmount * 12.f * s;
-        const float dd = 0.45f + 0.25f * diffusion;          // decay diffusion 1 (paper: 0.7)
-        lAP1.g = rAP1.g = -dd; lAP2.g = rAP2.g = 0.25f + 0.25f * diffusion;   // paper: 0.5
+        const float dd = 0.45f + 0.25f * diffusion;
+        lAP1.g = rAP1.g = -dd; lAP2.g = rAP2.g = 0.25f + 0.25f * diffusion;
         for (int k = 0; k < 4; ++k) inAP[k].g = (k < 2 ? 0.75f : 0.625f) * (0.6f + 0.4f * diffusion);
     }
     inline void process (float in, float& oL, float& oR)
@@ -309,21 +341,21 @@ public:
         clear();
     }
     void clear() { for (auto& q : sp) { q.loop.clear(); for (auto& st : q.st) st = {}; q.lp.reset(); q.hp.reset(); q.inLp.reset(); } }
-    void setTargets (float rt60, float dampHz, float character, float sizeNorm)
+    void setTargets (float rt60, float dampHz, float character, float sizeNorm, bool freezeOn)
     {
         const float ms[2] = { 34.f + 14.f * sizeNorm, 41.f + 18.f * sizeNorm };
         for (int k = 0; k < 2; ++k)
         {
             sp[k].delay = ms[k] * 0.001f * sr;
-            sp[k].fb = std::min (0.97f, std::pow (10.f, -3.f * ms[k] * 0.001f / std::max (0.1f, rt60 * 1.2f)));
-            sp[k].lp.setCutoff (std::min (dampHz, 6500.f), sr); sp[k].hp.setCutoff (160.f, sr); sp[k].inLp.setCutoff (5500.f, sr);
+            sp[k].fb = freezeOn ? 0.9997f : std::min (0.97f, std::pow (10.f, -3.f * ms[k] * 0.001f / std::max (0.1f, rt60 * 1.38f)));
+            sp[k].lp.setCutoff (freezeOn ? 0.45f * sr : std::min (dampHz, 6500.f), sr); sp[k].hp.setCutoff (freezeOn ? 25.f : 160.f, sr); sp[k].inLp.setCutoff (5500.f, sr);
         }
         a = -(0.45f + 0.3f * character); drive = 1.f + 3.f * character;
     }
     inline void process (float inL, float inR, float& oL, float& oR)
     {
         const float m = (inL + inR) * 0.5f;
-        oL = sp[0].run (m, a, drive, Stages) ; oR = sp[1].run (m, a, drive, Stages);
+        oL = sp[0].run (m, a, drive, Stages); oR = sp[1].run (m, a, drive, Stages);
     }
 private:
     struct AP1 { float x1 = 0.f, y1 = 0.f; inline float p (float x, float a) { const float y = a * (x - y1) + x1; x1 = x; y1 = y; return y; } };
@@ -350,28 +382,31 @@ struct Params
         mod = .3f, width = 1.f, tone = .5f, character = .5f; bool freeze = false;
 };
 
+// shoebox geometry (metres) used to compute the early reflections of each room type
+struct RoomGeo { float lx, ly, lz, beta; int maxRefl; float earSep; };
+
 class Engine
 {
 public:
     void prepare (double sampleRate, int)
     {
         sr = (float) sampleRate;
-        pdL.init ((int) (0.56f * sr)); pdR.init ((int) (0.56f * sr)); erD.init ((int) (0.5f * sr));
-        tailL.init ((int) (0.12f * sr)); tailR.init ((int) (0.12f * sr));
+        pdL.init ((int) (0.56f * sr)); pdR.init ((int) (0.56f * sr)); erD.init ((int) (0.62f * sr));
+        tailL.init ((int) (0.2f * sr)); tailR.init ((int) (0.2f * sr)); wobD[0].init ((int) (0.02f * sr)); wobD[1].init ((int) (0.02f * sr));
         fdn.prepare (sr); plate.prepare (sr); spring.prepare (sr); ps.prepare (sr);
         initialised = false; resetAll();
     }
     void resetAll()
     {
-        pdL.clear(); pdR.clear(); erD.clear(); tailL.clear(); tailR.clear();
+        pdL.clear(); pdR.clear(); erD.clear(); tailL.clear(); tailR.clear(); wobD[0].clear(); wobD[1].clear();
         fdn.clear(); plate.clear(); spring.clear(); ps.clear();
-        shimLp.reset(); lofiLp[0].reset(); lofiLp[1].reset(); tiltLp[0].reset(); tiltLp[1].reset();
-        lastShim = 0.f; holdL = holdR = 0.f; holdCnt = 0; lofiPh = 0.f;
+        shimLp.reset(); lofiLp[0].reset(); lofiLp[1].reset(); tiltLp[0].reset(); tiltLp[1].reset(); erLp[0].reset(); erLp[1].reset();
+        lastShim = 0.f; holdL = holdR = 0.f; holdCnt = 0; lofiPh = 0.f; wobPh = 0.f;
     }
     void setParams (const Params& p)
     {
         P = p;
-        if (! initialised) { curType = pendingType = p.type; buildER (curType); initialised = true; pdCur = p.predelayMs * 0.001f * sr; sizeCur = 1.f; }
+        if (! initialised) { curType = pendingType = p.type; buildER (curType); initialised = true; pdCur = p.predelayMs * 0.001f * sr; erScaleCur = 1.f; }
         pendingType = p.type;
         pdTgt = clampf (p.predelayMs, 0.f, 500.f) * 0.001f * sr;
         applyTargets (curType);
@@ -384,6 +419,7 @@ public:
         for (int i = 0; i < n; ++i)
         {
             pdCur += (pdTgt - pdCur) * 0.003f;
+            erScaleCur += (erScale - erScaleCur) * 0.0008f;
             if (pendingType != curType)
             {
                 fadeGain -= fadeStep;
@@ -405,7 +441,7 @@ public:
                 }
                 case Spring:
                 {
-                    spring.process (dl, dr, wl, wr);
+                    spring.process (P.freeze ? 0.f : dl, P.freeze ? 0.f : dr, wl, wr);
                     wl *= 0.8f; wr *= 0.8f;
                     break;
                 }
@@ -414,24 +450,30 @@ public:
                     const float mono = P.freeze ? 0.f : (dl + dr) * 0.5f;
                     erD.push (mono);
                     float erL = 0.f, erR = 0.f;
-                    for (int t = 0; t < kTaps; ++t)
+                    const float tsc = 0.001f * sr * erScaleCur, maxD = (float) erD.mask - 4.f;
+                    for (int t = 0; t < nTaps; ++t)
                     {
-                        const float v = erD.read (std::max (1.f, erMs[t] * 0.001f * sr * erScale));
-                        erL += v * erGL[t]; erR += v * erGR[t];
+                        erL += erD.read (std::min (maxD, std::max (1.f, erMsL[t] * tsc))) * erGainL[t];
+                        erR += erD.read (std::min (maxD, std::max (1.f, erMsR[t] * tsc))) * erGainR[t];
                     }
+                    erL = erLp[0].lp (erL); erR = erLp[1].lp (erR);
                     tailL.push (P.freeze ? 0.f : dl); tailR.push (P.freeze ? 0.f : dr);
-                    const float tdl = tailMs * 0.001f * sr;
+                    const float tdl = std::min (tailMs * erScaleCur * 0.001f * sr, 0.19f * sr);
                     float oL, oR;
                     fdn.process (tailL.read (tdl), tailR.read (tdl), lastShim, oL, oR);
                     if (curType == Shimmer)
                     {
                         const float shimmed = ps.process (shimLp.lp ((oL + oR) * 0.5f), 2.0f);
-                        lastShim = shimmed * (0.05f + 0.5f * P.character);
+                        lastShim = shimmed * (0.05f + 0.5f * P.character) * (P.freeze ? 0.35f : 1.f);
                     }
-                    wl = erL * erMul + oL; wr = erR * erMul + oR;
+                    wl = erL * erMul + oL * lateMul; wr = erR * erMul + oR * lateMul;
                     if (curType == LoFi)
                     {
-                        lofiPh += 0.0f;
+                        // tape wow & flutter on the wet signal
+                        wobPh += (0.7f + 5.5f * 0.02f) / sr; if (wobPh > 1.f) wobPh -= 1.f;
+                        const float wob = (0.0006f * std::sin (2.f * kPi * wobPh) + 0.00012f * std::sin (2.f * kPi * 6.3f * wobPh * 1.f)) * sr * (0.3f + P.mod);
+                        wobD[0].push (wl); wobD[1].push (wr);
+                        wl = wobD[0].read (0.004f * sr + wob); wr = wobD[1].read (0.004f * sr + wob * 0.8f);
                         const int hold = 1 + (int) (P.character * 4.f);
                         if (++holdCnt >= hold) { holdCnt = 0; holdL = wl; holdR = wr; }
                         const float step = std::pow (2.f, 1.f - (15.f - 5.f * P.character));
@@ -441,27 +483,44 @@ public:
                     break;
                 }
             }
-            wl *= kTrim[curType]; wr *= kTrim[curType];
-            // tone tilt
+            wl *= trimOf (curType); wr *= trimOf (curType);
             { const float lo = tiltLp[0].lp (wl); wl = lo * tiltLo + (wl - lo) * tiltHi; }
             { const float lo = tiltLp[1].lp (wr); wr = lo * tiltLo + (wr - lo) * tiltHi; }
-            // width
             const float m = 0.5f * (wl + wr), sd = 0.5f * (wl - wr) * P.width;
             l[i] = (m + sd) * fadeGain; r[i] = (m - sd) * fadeGain;
         }
     }
 
+    // exposed for the offline test bench
+    static float trimOf (int t) { return kTrim[t]; }
+
 private:
-    static constexpr int kTaps = 12;
-    static constexpr float kTrim[NumTypes] = { 1.25f, 0.7f, 0.55f, 1.2f, 1.1f, 1.2f, 1.45f, 1.9f };
+    static constexpr int kMaxTaps = 64;
+    // level match of every type (measured with pink noise by test/engine_test.cpp)
+    static constexpr float kTrim[NumTypes] = { 1.46f, 1.40f, 0.39f, 1.51f, 1.59f, 1.40f, 1.33f, 0.45f };
+
+    static constexpr RoomGeo kGeo[NumTypes] = {
+        /* Hall      */ { 34.f, 22.f, 15.f, 0.86f, 5, 1.40f },
+        /* Plate     */ {  0.f,  0.f,  0.f, 0.00f, 0, 0.00f },
+        /* Room      */ { 4.6f, 3.7f, 2.7f, 0.74f, 7, 0.55f },
+        /* Space     */ { 80.f, 55.f, 40.f, 0.90f, 4, 2.50f },
+        /* Spring    */ {  0.f,  0.f,  0.f, 0.00f, 0, 0.00f },
+        /* Shimmer   */ { 38.f, 26.f, 17.f, 0.88f, 4, 1.80f },
+        /* Cathedral */ { 62.f, 30.f, 32.f, 0.93f, 4, 2.50f },
+        /* Lo-Fi     */ { 5.2f, 4.0f, 2.8f, 0.70f, 6, 0.45f } };
 
     void applyTargets (int type)
     {
-        const float scaleOf[NumTypes] = { 1.0f, 1.0f, 0.45f, 1.3f, 1.0f, 1.0f, 1.5f, 0.9f };
+        //                                        Hall  Plate Room  Space Spring Shim  Cath  LoFi
+        static const float scaleOf[NumTypes]  = { 1.00f, 1.0f, 0.34f, 0.90f, 1.0f, 1.10f, 0.95f, 0.40f };
+        static const float lowOf[NumTypes]    = { 1.25f, 1.0f, 0.90f, 1.20f, 1.0f, 1.15f, 1.40f, 0.80f };
+        static const float tailOf[NumTypes]   = { 14.f,  0.f,  4.f,   22.f,  0.f,  16.f,  34.f,  5.f };
+        static const float rtMulOf[NumTypes]  = { 1.17f, 1.0f, 1.19f, 1.11f, 1.0f, 1.07f, 1.03f, 1.54f };  // so the displayed time == measured RT60
+        static const float lateOf[NumTypes]   = { 1.0f,  1.0f, 1.8f,  1.0f,  1.0f, 1.0f,  1.0f,  1.5f };
         const float norm = 0.35f + 1.65f * P.size;
         const float sizeMul = scaleOf[type] * norm;
         float dampHz = 18000.f * std::pow (1200.f / 18000.f, P.damping);
-        float modMul = 1.f, erLevelMul = 1.f;
+        float modMul = 1.f;
         switch (type)
         {
             case Cathedral: dampHz *= 0.8f; break;
@@ -473,40 +532,77 @@ private:
         const float modSamples = P.mod * sr * 0.0004f * modMul;
         const float diffG = 0.35f + 0.4f * P.diffusion;
         erScale = norm;
-        erLevelMul = (type == Room || type == LoFi) ? (0.5f + P.character) : (1.4f - 1.2f * P.character);
-        erMul = erLevelMul;
-        const float tails[NumTypes] = { 15.f, 0.f, 0.f, 20.f, 0.f, 15.f, 30.f, 0.f };
-        tailMs = tails[type];
-        fdn.setTargets (sizeMul, P.decay * (type == Room ? 1.45f : 1.f), dampHz, modSamples, diffG, P.freeze);
+        // early reflections: dominant in small rooms, a supporting cue in big ones. "character" balances them.
+        const bool small = (type == Room || type == LoFi);
+        erMul = small ? (0.85f + 1.3f * P.character) : (type == Cathedral ? 0.55f : 0.65f) * (1.5f - 1.1f * P.character);
+        erLp[0].setCutoff (std::min (16000.f, dampHz * 1.4f), sr); erLp[1].setCutoff (std::min (16000.f, dampHz * 1.4f), sr);
+        tailMs = tailOf[type]; lateMul = lateOf[type];
+        fdn.setTargets (sizeMul, P.decay * rtMulOf[type], lowOf[type], dampHz, modSamples, diffG, P.freeze);
         plate.setTargets (norm, P.decay, std::min (dampHz, 14000.f), P.mod, P.diffusion, P.character, P.freeze);
-        spring.setTargets (P.decay, dampHz, P.character, P.size);
+        spring.setTargets (P.decay, dampHz, P.character, P.size, P.freeze);
         shimLp.setCutoff (7000.f, sr);
         lofiLp[0].setCutoff (7000.f - 4500.f * P.character, sr); lofiLp[1].setCutoff (7000.f - 4500.f * P.character, sr);
     }
 
+    // image-source model of a shoebox: each tap is one wall reflection path (delay + 1/r level + wall loss)
     void buildER (int type)
     {
-        //                     level  start span  curve
-        const float cfg[NumTypes][4] = { { .45f, 12.f, 70.f, 1.2f }, { 0, 0, 0, 1 }, { .8f, 2.5f, 35.f, .9f }, { .2f, 20.f, 110.f, 1.3f },
-                                         { 0, 0, 0, 1 }, { .15f, 15.f, 90.f, 1.2f }, { .35f, 30.f, 170.f, 1.4f }, { .4f, 6.f, 50.f, 1.f } };
-        uint32_t seed = 12345u + (uint32_t) type * 7919u;
+        nTaps = 0;
+        const RoomGeo& G = kGeo[type];
+        if (G.lx <= 0.f) return;
+        const float c = 343.f;
+        const float sx = 0.28f * G.lx, sy = 0.5f * G.ly, sz = std::min (1.7f, 0.55f * G.lz);
+        const float lx0 = 0.72f * G.lx, ly0 = 0.5f * G.ly, lz0 = std::min (1.5f, 0.5f * G.lz);
+        const float es = G.earSep * 0.5f;
+        struct Img { float dL, dR, dM, g; };
+        std::vector<Img> v;
+        const float dDirL = std::sqrt ((lx0 - sx) * (lx0 - sx) + (ly0 - es - sy) * (ly0 - es - sy) + (lz0 - sz) * (lz0 - sz));
+        const float dDirR = std::sqrt ((lx0 - sx) * (lx0 - sx) + (ly0 + es - sy) * (ly0 + es - sy) + (lz0 - sz) * (lz0 - sz));
+        uint32_t seed = 9001u + (uint32_t) type * 7919u;
         auto rnd = [&] { seed = seed * 1664525u + 1013904223u; return (float) (seed >> 8) / 16777216.f; };
-        for (int t = 0; t < kTaps; ++t)
+        for (int nx = -2; nx <= 2; ++nx) for (int qx = 0; qx < 2; ++qx)
+        for (int ny = -2; ny <= 2; ++ny) for (int qy = 0; qy < 2; ++qy)
+        for (int nz = -2; nz <= 2; ++nz) for (int qz = 0; qz < 2; ++qz)
         {
-            const float u = ((float) t + 0.3f + 0.4f * rnd()) / (float) kTaps;
-            erMs[t] = cfg[type][1] + cfg[type][2] * std::pow (u, cfg[type][3]);
-            const float gain = cfg[type][0] * (1.f - 0.8f * u) * (0.6f + 0.4f * rnd()) * ((t & 1) ? -1.f : 1.f);
-            const float pan = rnd() * 2.f - 1.f;
-            erGL[t] = gain * std::sqrt ((1.f - pan) * 0.5f); erGR[t] = gain * std::sqrt ((1.f + pan) * 0.5f);
+            const int k = std::abs (nx - qx) + std::abs (nx) + std::abs (ny - qy) + std::abs (ny) + std::abs (nz - qz) + std::abs (nz);
+            if (k == 0 || k > G.maxRefl) continue;
+            const float ix = (1 - 2 * qx) * sx + 2.f * (float) nx * G.lx;
+            const float iy = (1 - 2 * qy) * sy + 2.f * (float) ny * G.ly;
+            const float iz = (1 - 2 * qz) * sz + 2.f * (float) nz * G.lz;
+            auto dist = [&] (float px, float py, float pz) { return std::sqrt ((ix - px) * (ix - px) + (iy - py) * (iy - py) + (iz - pz) * (iz - pz)); };
+            Img im;
+            im.dL = dist (lx0, ly0 - es, lz0); im.dR = dist (lx0, ly0 + es, lz0); im.dM = 0.5f * (im.dL + im.dR);
+            im.g = std::pow (G.beta, (float) k) * (0.5f * (dDirL + dDirR) / im.dM) * (0.85f + 0.3f * rnd());
+            v.push_back (im);
+        }
+        std::sort (v.begin(), v.end(), [] (const Img& a, const Img& b) { return a.dM < b.dM; });
+        // the discrete reflections only run for a limited time, then the FDN diffuse field takes over
+        static const float limitMs[NumTypes] = { 110.f, 0.f, 60.f, 150.f, 0.f, 120.f, 170.f, 50.f };
+        const float lim = limitMs[type];
+        nTaps = 0;
+        for (size_t q = 0; q < v.size() && nTaps < kMaxTaps; ++q)
+        {
+            const float tms = 1000.f * (v[q].dM - 0.5f * (dDirL + dDirR)) / c;
+            if (tms > lim) break;
+            const int t = nTaps++;
+            v[(size_t) t].g = v[q].g * (1.f - 0.65f * tms / lim); v[(size_t) t].dL = v[q].dL; v[(size_t) t].dR = v[q].dR;
+        }
+        for (int t = 0; t < nTaps; ++t)
+        {
+            erMsL[t] = std::max (0.3f, 1000.f * (v[(size_t) t].dL - dDirL) / c + 0.3f);
+            erMsR[t] = std::max (0.3f, 1000.f * (v[(size_t) t].dR - dDirR) / c + 0.3f);
+            const float pan = 0.45f * (rnd() * 2.f - 1.f);          // each wall bounce lands slightly left or right
+            erGainL[t] = v[(size_t) t].g * 0.55f * (1.f + pan);
+            erGainR[t] = v[(size_t) t].g * 0.55f * (1.f - pan);
         }
     }
 
-    float sr = 48000.f, pdCur = 0.f, pdTgt = 0.f, sizeCur = 1.f, fadeGain = 1.f, tailMs = 0.f, erScale = 1.f, erMul = 1.f;
-    float tiltLo = 1.f, tiltHi = 1.f, lastShim = 0.f, holdL = 0.f, holdR = 0.f, lofiPh = 0.f; int holdCnt = 0;
-    bool initialised = false; int curType = Hall, pendingType = Hall; Params P;
-    Delay pdL, pdR, erD, tailL, tailR; FDN fdn; PlateReverb plate; SpringReverb spring; PitchShifter ps;
-    OnePole shimLp, lofiLp[2], tiltLp[2];
-    float erMs[kTaps] {}, erGL[kTaps] {}, erGR[kTaps] {};
+    float sr = 48000.f, pdCur = 0.f, pdTgt = 0.f, fadeGain = 1.f, tailMs = 0.f, erScale = 1.f, erScaleCur = 1.f, erMul = 1.f, lateMul = 1.f;
+    float tiltLo = 1.f, tiltHi = 1.f, lastShim = 0.f, holdL = 0.f, holdR = 0.f, lofiPh = 0.f, wobPh = 0.f; int holdCnt = 0;
+    bool initialised = false; int curType = Hall, pendingType = Hall; Params P; int nTaps = 0;
+    Delay pdL, pdR, erD, tailL, tailR, wobD[2]; FDN fdn; PlateReverb plate; SpringReverb spring; PitchShifter ps;
+    OnePole shimLp, lofiLp[2], tiltLp[2], erLp[2];
+    float erMsL[kMaxTaps] {}, erMsR[kMaxTaps] {}, erGainL[kMaxTaps] {}, erGainR[kMaxTaps] {};
 };
 
 } // namespace bh
